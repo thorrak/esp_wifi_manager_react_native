@@ -1,0 +1,104 @@
+{
+  "name": "esp-wifi-manager-react-native",
+  "version": "0.1.0",
+  "description": "React Native library for BLE-based WiFi provisioning of ESP32 devices running esp_wifi_manager",
+  "main": "lib/commonjs/index.js",
+  "module": "lib/module/index.js",
+  "types": "lib/typescript/index.d.ts",
+  "react-native": "src/index.ts",
+  "source": "src/index.ts",
+  "files": [
+    "src",
+    "lib",
+    "!**/__tests__",
+    "!**/__fixtures__",
+    "!**/__mocks__"
+  ],
+  "scripts": {
+    "build": "bob build",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint \"src/**/*.{ts,tsx}\"",
+    "test": "jest",
+    "prepare": "bob build"
+  },
+  "keywords": [
+    "react-native",
+    "ble",
+    "bluetooth",
+    "wifi",
+    "provisioning",
+    "esp32",
+    "esp_wifi_manager",
+    "iot"
+  ],
+  "license": "MIT",
+  "peerDependencies": {
+    "react": ">=18.0.0",
+    "react-native": ">=0.72.0",
+    "react-native-ble-plx": ">=3.0.0",
+    "@react-navigation/native": ">=7.0.0",
+    "@react-navigation/native-stack": ">=7.0.0",
+    "react-native-screens": ">=4.0.0",
+    "react-native-safe-area-context": ">=4.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@react-navigation/native": {
+      "optional": true
+    },
+    "@react-navigation/native-stack": {
+      "optional": true
+    },
+    "react-native-screens": {
+      "optional": true
+    },
+    "react-native-safe-area-context": {
+      "optional": true
+    }
+  },
+  "dependencies": {
+    "zustand": "^5.0.0"
+  },
+  "devDependencies": {
+    "@react-navigation/native": "^7.0.0",
+    "@react-navigation/native-stack": "^7.0.0",
+    "@testing-library/react-native": "^12.0.0",
+    "@types/jest": "^29.5.0",
+    "@types/react": "^18.2.0",
+    "eslint": "^8.57.0",
+    "jest": "^29.7.0",
+    "react": "^18.2.0",
+    "react-native": "^0.76.0",
+    "react-native-ble-plx": "^3.2.0",
+    "react-native-builder-bob": "^0.35.0",
+    "react-native-safe-area-context": "^4.14.0",
+    "react-native-screens": "^4.4.0",
+    "ts-jest": "^29.2.0",
+    "typescript": "^5.5.0"
+  },
+  "react-native-builder-bob": {
+    "source": "src",
+    "output": "lib",
+    "targets": [
+      "commonjs",
+      "module",
+      [
+        "typescript",
+        {
+          "project": "tsconfig.build.json"
+        }
+      ]
+    ]
+  },
+  "jest": {
+    "preset": "ts-jest",
+    "testEnvironment": "node",
+    "modulePathIgnorePatterns": [
+      "<rootDir>/lib/",
+      "<rootDir>/esp_wifi_manager_vue/"
+    ],
+    "moduleNameMapper": {
+      "^react-native-ble-plx$": "<rootDir>/src/__mocks__/react-native-ble-plx.ts",
+      "^react-native$": "<rootDir>/src/__mocks__/react-native.ts"
+    }
+  }
+}

@@ -1,0 +1,62 @@
+# Dependencies
+node_modules/
+
+# Build output
+lib/
+dist/
+
+# React Native
+*.xcworkspace
+*.xcodeproj
+Pods/
+build/
+*.ipa
+*.apk
+*.aab
+*.dSYM.zip
+*.dSYM
+
+# Metro
+.metro-health-check*
+
+# TypeScript
+*.tsbuildinfo
+
+# Env files
+.env
+.env.*
+
+# macOS
+.DS_Store
+._*
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Linux
+*~
+.directory
+
+# IDEs
+.idea/
+.vscode/
+*.swp
+*.swo
+*.sublime-workspace
+*.sublime-project
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Package manager lock files (library — consumers use their own)
+package-lock.json
+
+# Misc
+*.tgz
+.cache/

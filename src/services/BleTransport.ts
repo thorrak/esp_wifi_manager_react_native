@@ -448,6 +448,53 @@ export class BleTransport extends TypedEventEmitter<BleTransportEvents> {
     }
   }
 
+  /**
+   * Wait for the BLE adapter to reach PoweredOn state.
+   *
+   * Uses a polling approach instead of onStateChange(_, true) because
+   * react-native-ble-plx has an unhandled-rejection bug in that code path
+   * when the CBCentralManager is still in Unknown state.
+   *
+   * Returns true if PoweredOn, false if unavailable (emits error events).
+   */
+  private async waitForPoweredOn(): Promise<boolean> {
+    const maxWaitMs = 10_000;
+    const pollMs = 200;
+    const deadline = Date.now() + maxWaitMs;
+
+    while (Date.now() < deadline) {
+      let state: State;
+      try {
+        state = await this.bleManager.state();
+      } catch {
+        // state() can throw BleErrorCode 103 before CBCentralManager is ready
+        state = State.Unknown;
+      }
+
+      if (state === State.PoweredOn) {
+        return true;
+      }
+
+      if (state === State.PoweredOff || state === State.Unauthorized) {
+        log.error('BLE adapter unavailable:', state);
+        this.setConnectionState('disconnected');
+        this.emit('scanStopped');
+        this.emit('error', new Error(`Bluetooth is ${state}`));
+        return false;
+      }
+
+      // Still Unknown or Resetting — wait and retry
+      await new Promise<void>((r) => setTimeout(r, pollMs));
+    }
+
+    // Timed out waiting for BLE adapter
+    log.error('Timed out waiting for BLE adapter to power on');
+    this.setConnectionState('disconnected');
+    this.emit('scanStopped');
+    this.emit('error', new Error('Bluetooth adapter did not become ready'));
+    return false;
+  }
+
   /** Handle unexpected disconnection (device side or Bluetooth off). */
   private handleUnexpectedDisconnect(): void {
     this.cleanupSubscriptions();

@@ -4,7 +4,7 @@ BLE-based WiFi provisioning for ESP32 devices from React Native apps.
 
 ## Overview
 
-`esp-wifi-manager-react-native` is a React Native library that lets your mobile app configure WiFi on ESP32 IoT devices over Bluetooth Low Energy. It communicates with ESP32 devices running the [esp_wifi_manager](https://github.com/your-org/esp_wifi_manager) firmware using a structured JSON protocol over BLE GATT characteristics.
+`esp-wifi-manager-react-native` is a React Native library that lets your mobile app configure WiFi on ESP32 IoT devices over Bluetooth Low Energy. It communicates with ESP32 devices running the [esp_wifi_manager](https://github.com/tuanpmt/esp_wifi_manager) firmware using a structured JSON protocol over BLE GATT characteristics.
 
 The library supports three usage modes to fit any integration need:
 
@@ -15,6 +15,8 @@ The library supports three usage modes to fit any integration need:
 | **Headless service classes** | Non-React code, background tasks, testing | Plain TypeScript classes with no React dependency |
 
 **Platforms:** iOS and Android.
+
+> **Expo:** Fully supported with [custom development builds](https://docs.expo.dev/develop/development-builds/introduction/). Not compatible with Expo Go (requires native BLE module). See [Expo Setup](#expo-setup) below.
 
 ## Features
 
@@ -83,13 +85,73 @@ Add permissions to `AndroidManifest.xml`:
 
 > **Note:** Android 12+ (API 31+) requires runtime permission requests for `BLUETOOTH_SCAN` and `BLUETOOTH_CONNECT`. Your app must request these permissions before calling any library methods. The library does not handle runtime permission prompts itself.
 
+### Expo setup
+
+This library requires `react-native-ble-plx`, a native module that is **not available in Expo Go**. You must use a [custom development build](https://docs.expo.dev/develop/development-builds/introduction/).
+
+**1. Install dependencies:**
+
+```bash
+npx expo install react-native-ble-plx expo-build-properties
+npm install esp-wifi-manager-react-native
+```
+
+**2. Configure permissions in `app.json`:**
+
+```json
+{
+  "expo": {
+    "plugins": [
+      [
+        "expo-build-properties",
+        {
+          "ios": {
+            "deploymentTarget": "13.4"
+          }
+        }
+      ],
+      [
+        "react-native-ble-plx",
+        {
+          "isBackgroundEnabled": false,
+          "neverForLocation": true
+        }
+      ]
+    ],
+    "ios": {
+      "infoPlist": {
+        "NSBluetoothAlwaysUsageDescription": "This app uses Bluetooth to configure WiFi on your device"
+      }
+    },
+    "android": {
+      "permissions": [
+        "android.permission.BLUETOOTH_SCAN",
+        "android.permission.BLUETOOTH_CONNECT",
+        "android.permission.ACCESS_FINE_LOCATION"
+      ]
+    }
+  }
+}
+```
+
+**3. Build and run:**
+
+```bash
+npx expo prebuild
+npx expo run:ios    # or: npx expo run:android
+```
+
 ## Quick Start -- Pre-built UI
 
 The fastest way to get WiFi provisioning working. `ProvisioningNavigator` renders a complete multi-step wizard: device scanning, network selection, password entry, connection monitoring, and a success/manage screen.
 
+> **Note:** `ProvisioningNavigator` is exported from a separate entry point to avoid requiring `@react-navigation` for hooks-only users.
+
+### With React Navigation (classic)
+
 ```tsx
 import { NavigationContainer } from '@react-navigation/native';
-import { ProvisioningNavigator } from 'esp-wifi-manager-react-native';
+import { ProvisioningNavigator } from 'esp-wifi-manager-react-native/navigation';
 
 function App() {
   return (
@@ -102,6 +164,42 @@ function App() {
       />
     </NavigationContainer>
   );
+}
+```
+
+### With Expo Router
+
+Expo Router provides its own `NavigationContainer`, so you should **not** wrap `ProvisioningNavigator` in one. Instead, render it inside a route:
+
+```tsx
+// app/provision.tsx
+import { ProvisioningNavigator } from 'esp-wifi-manager-react-native/navigation';
+
+export default function ProvisionScreen() {
+  return (
+    <ProvisioningNavigator
+      onComplete={(result) => {
+        console.log('Provisioned!', result.ssid, result.ip);
+      }}
+      onDismiss={() => router.back()}
+    />
+  );
+}
+```
+
+### With Expo Router (hooks-only)
+
+For full control over navigation, use hooks without the pre-built navigator:
+
+```tsx
+// app/provision/index.tsx
+import { useProvisioning, useDeviceScanner } from 'esp-wifi-manager-react-native';
+
+export default function ProvisionScreen() {
+  const { step, scannedNetworks, scanForDevices, connectToDevice, submitCredentials } = useProvisioning();
+  const { discoveredDevices, scanning, startScan } = useDeviceScanner();
+
+  // Build your own UI and handle navigation with expo-router...
 }
 ```
 
@@ -169,7 +267,7 @@ const transport = new BleTransport();
 const protocol = new DeviceProtocol(transport);
 
 // Scan for devices
-transport.startScan();
+await transport.startScan();
 transport.on('deviceDiscovered', async (device) => {
   console.log('Found:', device.name, device.rssi);
   transport.stopScan();
@@ -286,7 +384,7 @@ Pre-built UI components that can be used independently or composed into a custom
 
 | Component | Description |
 |-----------|-------------|
-| `ProvisioningNavigator` | Complete provisioning wizard with navigation |
+| `ProvisioningNavigator` | Complete provisioning wizard with navigation (import from `esp-wifi-manager-react-native/navigation`) |
 | `NetworkList` | Scrollable list of scanned WiFi networks |
 | `NetworkListItem` | Single network row with signal icon and auth badge |
 | `SavedNetworkList` | List of saved networks with delete actions |
@@ -404,7 +502,7 @@ See [ARCHITECTURE.md](./ARCHITECTURE.md) for full details.
 
 ## ESP32 Device Requirements
 
-Your ESP32 must be running [esp_wifi_manager](https://github.com/your-org/esp_wifi_manager) with BLE provisioning enabled.
+Your ESP32 must be running [esp_wifi_manager](https://github.com/tuanpmt/esp_wifi_manager) with BLE provisioning enabled.
 
 | Requirement | Value |
 |-------------|-------|

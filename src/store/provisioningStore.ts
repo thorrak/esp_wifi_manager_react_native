@@ -153,7 +153,6 @@ const initialState: ProvisioningStoreState = {
 // Module-level subscription tracking
 // ---------------------------------------------------------------------------
 
-let subscribed = false;
 let unsubscribers: (() => void)[] = [];
 
 /**
@@ -167,10 +166,9 @@ function subscribeToServices(
       | ((state: ProvisioningStoreState) => Partial<ProvisioningStoreState>),
   ) => void,
 ): void {
-  if (subscribed) {
+  if (unsubscribers.length > 0) {
     return;
   }
-  subscribed = true;
 
   const transport = getTransport();
   const protocol = getProtocol();
@@ -334,7 +332,6 @@ export const useProvisioningStore = create<
       unsub();
     }
     unsubscribers = [];
-    subscribed = false;
 
     // Tear down services
     destroyServices();

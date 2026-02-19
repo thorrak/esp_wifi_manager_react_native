@@ -113,6 +113,8 @@ export {
   ManageScreen,
 } from './screens';
 
-// ── Navigation ──
-export { ProvisioningNavigator, SCREEN_NAMES, stepToScreenName } from './navigation';
-export type { ScreenName } from './navigation';
+// ── Navigation Utilities ──
+// Note: ProvisioningNavigator is exported from 'esp-wifi-manager-react-native/navigation'
+// to avoid requiring @react-navigation peer deps for hooks-only users.
+export { SCREEN_NAMES, stepToScreenName } from './navigation/navigationConfig';
+export type { ScreenName } from './navigation/navigationConfig';

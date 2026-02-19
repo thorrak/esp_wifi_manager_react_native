@@ -134,7 +134,7 @@ export class ProvisioningManager extends TypedEventEmitter<ProvisioningManagerEv
         await delay(DISCONNECT_SETTLE_MS);
       }
 
-      this.transport.startScan();
+      await this.transport.startScan();
       this.setStep('welcome');
     } catch (err: unknown) {
       const error = err instanceof Error ? err : new Error(String(err));

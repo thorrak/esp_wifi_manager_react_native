@@ -94,12 +94,12 @@ describe('BleTransport', () => {
   // --------------------------------------------------------------------------
 
   describe('scanning', () => {
-    it('startScan begins scanning and emits deviceDiscovered for matching devices', () => {
+    it('startScan begins scanning and emits deviceDiscovered for matching devices', async () => {
       transport = createTransport();
       const discovered: Array<{ id: string; name: string }> = [];
       transport.on('deviceDiscovered', (device) => discovered.push(device));
 
-      transport.startScan();
+      await transport.startScan();
 
       expect(transport.connectionState).toBe('scanning');
 
@@ -117,12 +117,12 @@ describe('BleTransport', () => {
       );
     });
 
-    it('startScan filters by device name prefix', () => {
+    it('startScan filters by device name prefix', async () => {
       transport = createTransport({ deviceNamePrefix: 'ESP32-WiFi-' });
       const discovered: Array<{ id: string; name: string }> = [];
       transport.on('deviceDiscovered', (device) => discovered.push(device));
 
-      transport.startScan();
+      await transport.startScan();
 
       const manager = (transport as unknown as { bleManager: BleManager }).bleManager;
       const scanCb = getScanCallback(manager);
@@ -141,12 +141,12 @@ describe('BleTransport', () => {
       expect(discovered[0]!.name).toBe('ESP32-WiFi-XYZ');
     });
 
-    it('startScan deduplicates devices by id', () => {
+    it('startScan deduplicates devices by id', async () => {
       transport = createTransport();
       const discovered: Array<{ id: string }> = [];
       transport.on('deviceDiscovered', (device) => discovered.push(device));
 
-      transport.startScan();
+      await transport.startScan();
 
       const manager = (transport as unknown as { bleManager: BleManager }).bleManager;
       const scanCb = getScanCallback(manager);
@@ -184,12 +184,12 @@ describe('BleTransport', () => {
       expect(scanStoppedHandler).not.toHaveBeenCalled();
     });
 
-    it('scan auto-stops after timeout', () => {
+    it('scan auto-stops after timeout', async () => {
       transport = createTransport({ scanTimeoutMs: 3000 });
       const scanStoppedHandler = jest.fn();
       transport.on('scanStopped', scanStoppedHandler);
 
-      transport.startScan();
+      await transport.startScan();
       expect(transport.connectionState).toBe('scanning');
 
       jest.advanceTimersByTime(3000);
@@ -210,12 +210,12 @@ describe('BleTransport', () => {
       expect((manager.startDeviceScan as jest.Mock).mock.calls.length).toBe(callCount);
     });
 
-    it('emits error and resets state when scan callback receives an error', () => {
+    it('emits error and resets state when scan callback receives an error', async () => {
       transport = createTransport();
       const errors: Error[] = [];
       transport.on('error', (err) => errors.push(err));
 
-      transport.startScan();
+      await transport.startScan();
 
       const manager = (transport as unknown as { bleManager: BleManager }).bleManager;
       const scanCb = getScanCallback(manager);

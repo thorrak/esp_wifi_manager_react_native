@@ -20,7 +20,7 @@ The library supports three usage modes to fit any integration need:
 
 ## Features
 
-- **BLE scanning and connection** -- discover ESP32 devices by name prefix, connect with MTU negotiation
+- **BLE scanning and connection** -- discover ESP32 devices by name prefix, connect with MTU negotiation, automatic Bluetooth adapter readiness checks
 - **WiFi network scanning** -- trigger a WiFi scan on the device and retrieve visible networks with signal strength and auth type
 - **Network provisioning** -- add a network with password, instruct the device to connect, and poll until connected
 - **Connection status polling** -- monitor WiFi state, IP address, signal quality, and uptime in real time
@@ -266,8 +266,7 @@ import { BleTransport, DeviceProtocol } from 'esp-wifi-manager-react-native';
 const transport = new BleTransport();
 const protocol = new DeviceProtocol(transport);
 
-// Scan for devices
-await transport.startScan();
+// Register listeners before starting the scan.
 transport.on('deviceDiscovered', async (device) => {
   console.log('Found:', device.name, device.rssi);
   transport.stopScan();
@@ -292,6 +291,9 @@ transport.on('deviceDiscovered', async (device) => {
   await transport.disconnect();
   await transport.destroy();
 });
+
+// Scan for devices (waits for BLE adapter to be ready).
+await transport.startScan();
 ```
 
 ### Service class overview
@@ -514,6 +516,15 @@ Your ESP32 must be running [esp_wifi_manager](https://github.com/tuanpmt/esp_wif
 | Protocol | JSON command/response envelopes over BLE GATT |
 
 The device must expose all three characteristics under the service UUID. The library validates this on connection and will throw a descriptive error if any are missing.
+
+### Bluetooth adapter state
+
+`startScan()` and `connect()` automatically wait for the Bluetooth adapter to reach `PoweredOn` state (up to 10 seconds). If the adapter is off or unavailable:
+
+- `startScan()` emits an `error` event and `scanStopped`, then returns without scanning.
+- `connect()` throws with a descriptive error message.
+
+Your app should still request runtime Bluetooth permissions (Android 12+) and check that the user has enabled Bluetooth before calling library methods. The adapter readiness check handles transient states like the adapter still initializing on app launch.
 
 See [bluetooth-provisioning.md](./bluetooth-provisioning.md) for the full BLE protocol specification.
 

@@ -135,7 +135,7 @@ export class BleTransport extends TypedEventEmitter<BleTransportEvents> {
   // Scanning
   // ────────────────────────────────────────────────────────────────────
 
-  startScan(): void {
+  async startScan(): Promise<void> {
     if (this._connectionState === 'scanning') {
       log.warn('Scan already in progress');
       return;
@@ -144,6 +144,10 @@ export class BleTransport extends TypedEventEmitter<BleTransportEvents> {
       log.warn('Cannot scan while connected or connecting');
       return;
     }
+
+    // Ensure the BLE adapter is ready before starting a scan.
+    const ready = await this.waitForPoweredOn();
+    if (!ready) return;
 
     log.info('Starting BLE scan', { prefix: this.config.deviceNamePrefix });
     this.discoveredDeviceIds.clear();
@@ -216,6 +220,13 @@ export class BleTransport extends TypedEventEmitter<BleTransportEvents> {
     }
 
     this.setConnectionState('connecting');
+
+    // Ensure the BLE adapter is ready before connecting.
+    const ready = await this.waitForPoweredOn();
+    if (!ready) {
+      this.setConnectionState('disconnected');
+      throw new Error('Bluetooth adapter is not ready');
+    }
 
     try {
       // 1. Connect to the device.
@@ -324,6 +335,17 @@ export class BleTransport extends TypedEventEmitter<BleTransportEvents> {
       const error = err instanceof Error ? err : new Error(String(err));
       log.error('Connection failed:', error.message);
       this.cleanupSubscriptions();
+
+      // Cancel the BLE-level connection to avoid a phantom radio connection
+      // (e.g. when characteristic validation fails after the radio connects).
+      if (this.device?.id) {
+        try {
+          await this.bleManager.cancelDeviceConnection(this.device.id);
+        } catch {
+          // Device may already be gone — ignore.
+        }
+      }
+
       this.device = null;
       this._connectedDeviceInfo = null;
       this.setConnectionState('disconnected');
@@ -497,6 +519,7 @@ export class BleTransport extends TypedEventEmitter<BleTransportEvents> {
 
   /** Handle unexpected disconnection (device side or Bluetooth off). */
   private handleUnexpectedDisconnect(): void {
+    const deviceId = this.device?.id;
     this.cleanupSubscriptions();
     this.device = null;
     this._connectedDeviceInfo = null;
@@ -504,6 +527,14 @@ export class BleTransport extends TypedEventEmitter<BleTransportEvents> {
     this.statusBuffer = '';
     this.lastWriteTime = 0;
     this.setConnectionState('disconnected');
+
+    // Close the Android GATT client to free resources. cancelDeviceConnection
+    // is safe to call on an already-disconnected device.
+    if (deviceId) {
+      this.bleManager.cancelDeviceConnection(deviceId).catch(() => {
+        // Expected to fail if the device is already fully gone — ignore.
+      });
+    }
   }
 
   /** Stop the BLE scan and clear the timeout, without emitting events. */

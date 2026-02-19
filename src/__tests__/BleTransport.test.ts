@@ -157,12 +157,12 @@ describe('BleTransport', () => {
       expect(discovered).toHaveLength(1);
     });
 
-    it('stopScan stops scanning and emits scanStopped', () => {
+    it('stopScan stops scanning and emits scanStopped', async () => {
       transport = createTransport();
       const scanStoppedHandler = jest.fn();
       transport.on('scanStopped', scanStoppedHandler);
 
-      transport.startScan();
+      await transport.startScan();
       expect(transport.connectionState).toBe('scanning');
 
       transport.stopScan();
@@ -198,14 +198,14 @@ describe('BleTransport', () => {
       expect(scanStoppedHandler).toHaveBeenCalledTimes(1);
     });
 
-    it('startScan is a no-op when already scanning', () => {
+    it('startScan is a no-op when already scanning', async () => {
       transport = createTransport();
-      transport.startScan();
+      await transport.startScan();
 
       const manager = (transport as unknown as { bleManager: BleManager }).bleManager;
       const callCount = (manager.startDeviceScan as jest.Mock).mock.calls.length;
 
-      transport.startScan(); // should be ignored
+      await transport.startScan(); // should be ignored
 
       expect((manager.startDeviceScan as jest.Mock).mock.calls.length).toBe(callCount);
     });
@@ -313,7 +313,7 @@ describe('BleTransport', () => {
       const scanStoppedHandler = jest.fn();
       transport.on('scanStopped', scanStoppedHandler);
 
-      transport.startScan();
+      await transport.startScan();
       expect(transport.connectionState).toBe('scanning');
 
       const manager = (transport as unknown as { bleManager: BleManager }).bleManager;

@@ -117,8 +117,8 @@ describe('BleTransport', () => {
       );
     });
 
-    it('startScan filters by device name prefix', async () => {
-      transport = createTransport({ deviceNamePrefix: 'ESP32-WiFi-' });
+    it('startScan filters by a single custom prefix string', async () => {
+      transport = createTransport({ deviceNamePrefix: 'BrewPi32-' });
       const discovered: Array<{ id: string; name: string }> = [];
       transport.on('deviceDiscovered', (device) => discovered.push(device));
 
@@ -135,10 +135,68 @@ describe('BleTransport', () => {
       scanCb(null, new Device('dev-null-name', null, -70, 517));
       expect(discovered).toHaveLength(0);
 
-      // Device with correct prefix should be emitted.
-      scanCb(null, new Device('dev-match', 'ESP32-WiFi-XYZ', -50, 517));
+      // Default prefix should NOT match when overridden.
+      scanCb(null, new Device('dev-default', 'ESP32-WiFi-XYZ', -50, 517));
+      expect(discovered).toHaveLength(0);
+
+      // Custom prefix should match.
+      scanCb(null, new Device('dev-match', 'BrewPi32-001', -50, 517));
       expect(discovered).toHaveLength(1);
-      expect(discovered[0]!.name).toBe('ESP32-WiFi-XYZ');
+      expect(discovered[0]!.name).toBe('BrewPi32-001');
+    });
+
+    it('startScan filters by multiple device name prefixes', async () => {
+      transport = createTransport({ deviceNamePrefix: ['BrewPi32-', 'TiltBridge-'] });
+      const discovered: Array<{ id: string; name: string }> = [];
+      transport.on('deviceDiscovered', (device) => discovered.push(device));
+
+      await transport.startScan();
+
+      const manager = (transport as unknown as { bleManager: BleManager }).bleManager;
+      const scanCb = getScanCallback(manager);
+
+      // Default prefix should NOT match when overridden.
+      scanCb(null, new Device('dev-no-match', 'ESP32-WiFi-ABC', -70, 517));
+      expect(discovered).toHaveLength(0);
+
+      // Unrelated device should not match.
+      scanCb(null, new Device('dev-other', 'OtherDevice', -70, 517));
+      expect(discovered).toHaveLength(0);
+
+      // First custom prefix should match.
+      scanCb(null, new Device('dev-brew', 'BrewPi32-001', -50, 517));
+      expect(discovered).toHaveLength(1);
+      expect(discovered[0]!.name).toBe('BrewPi32-001');
+
+      // Second custom prefix should also match.
+      scanCb(null, new Device('dev-tilt', 'TiltBridge-ABC', -55, 517));
+      expect(discovered).toHaveLength(2);
+      expect(discovered[1]!.name).toBe('TiltBridge-ABC');
+    });
+
+    it('scan timeout emits diagnostic error with prefix list when no devices match', async () => {
+      transport = createTransport({
+        deviceNamePrefix: ['BrewPi32-', 'TiltBridge-'],
+        scanTimeoutMs: 3000,
+      });
+      const errors: Error[] = [];
+      transport.on('error', (err) => errors.push(err));
+
+      await transport.startScan();
+
+      const manager = (transport as unknown as { bleManager: BleManager }).bleManager;
+      const scanCb = getScanCallback(manager);
+
+      // Simulate non-matching devices being seen during the scan window.
+      scanCb(null, new Device('dev-1', 'ESP32-WiFi-ABC', -60, 517));
+      scanCb(null, new Device('dev-2', 'SomeOther', -70, 517));
+
+      // Fire the scan timeout.
+      jest.advanceTimersByTime(3000);
+
+      expect(errors).toHaveLength(1);
+      expect(errors[0]!.message).toContain('none matched name prefixes [BrewPi32-, TiltBridge-]');
+      expect(errors[0]!.message).toContain('ESP32-WiFi-ABC');
     });
 
     it('startScan deduplicates devices by id', async () => {

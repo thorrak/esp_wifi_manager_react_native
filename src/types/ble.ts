@@ -30,8 +30,8 @@ export interface BleTransportEvents {
 }
 
 export interface BleTransportConfig {
-  /** Device name prefix to filter during scanning. Default: "ESP32-WiFi-" */
-  deviceNamePrefix?: string;
+  /** Device name prefix(es) to filter during scanning. Default: "ESP32-WiFi-" */
+  deviceNamePrefix?: string | string[];
   /** Scan timeout in ms. Default: 15000 */
   scanTimeoutMs?: number;
   /** Minimum delay between GATT writes in ms. Default: 120 */

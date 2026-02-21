@@ -50,16 +50,21 @@ const log = createLogger('BleTransport');
 
 /** Resolved config with all defaults applied. */
 interface ResolvedConfig {
-  deviceNamePrefix: string;
+  deviceNamePrefixes: string[];
   scanTimeoutMs: number;
   gattSettleMs: number;
   connectionTimeoutMs: number;
   requestedMtu: number;
 }
 
+function normalizePrefixes(input?: string | string[]): string[] {
+  if (input == null) return [DEVICE_NAME_PREFIX];
+  return Array.isArray(input) ? input : [input];
+}
+
 function resolveConfig(config?: BleTransportConfig): ResolvedConfig {
   return {
-    deviceNamePrefix: config?.deviceNamePrefix ?? DEVICE_NAME_PREFIX,
+    deviceNamePrefixes: normalizePrefixes(config?.deviceNamePrefix),
     scanTimeoutMs: config?.scanTimeoutMs ?? DEFAULT_SCAN_TIMEOUT_MS,
     gattSettleMs: config?.gattSettleMs ?? GATT_SETTLE_MS,
     connectionTimeoutMs: config?.connectionTimeoutMs ?? DEFAULT_CONNECTION_TIMEOUT_MS,
@@ -152,7 +157,7 @@ export class BleTransport extends TypedEventEmitter<BleTransportEvents> {
     const ready = await this.waitForPoweredOn();
     if (!ready) return;
 
-    log.info('Starting BLE scan', { prefix: this.config.deviceNamePrefix });
+    log.info('Starting BLE scan', { prefixes: this.config.deviceNamePrefixes });
     this.discoveredDeviceIds.clear();
     this.setConnectionState('scanning');
 
@@ -182,7 +187,7 @@ export class BleTransport extends TypedEventEmitter<BleTransportEvents> {
         log.debug('Scan saw device:', { id: device.id, name, rssi: device.rssi });
       }
 
-      if (!name || !name.startsWith(this.config.deviceNamePrefix)) {
+      if (!name || !this.config.deviceNamePrefixes.some((p) => name.startsWith(p))) {
         return;
       }
 
@@ -206,7 +211,8 @@ export class BleTransport extends TypedEventEmitter<BleTransportEvents> {
     this.scanTimeoutId = setTimeout(() => {
       const matched = this.discoveredDeviceIds.size;
       const total = allSeenIds.size;
-      log.info(`Scan timeout: saw ${total} device(s), ${matched} matched prefix "${this.config.deviceNamePrefix}"`);
+      const prefixLabel = this.config.deviceNamePrefixes.join(', ');
+      log.info(`Scan timeout: saw ${total} device(s), ${matched} matched prefixes [${prefixLabel}]`);
 
       // Surface diagnostic info as an error when no devices matched
       if (matched === 0 && total > 0) {
@@ -217,7 +223,7 @@ export class BleTransport extends TypedEventEmitter<BleTransportEvents> {
         this.emit(
           'error',
           new Error(
-            `Found ${total} BLE device(s) but none matched name prefix "${this.config.deviceNamePrefix}". ` +
+            `Found ${total} BLE device(s) but none matched name prefixes [${prefixLabel}]. ` +
             `Names seen: [${names || '(all unnamed)'}]`,
           ),
         );

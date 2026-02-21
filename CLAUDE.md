@@ -49,6 +49,7 @@ BleTransport → DeviceProtocol → ConnectionPoller → ProvisioningManager
 - react-native-ble-plx uses base64 for characteristic values; utilities in `src/utils/base64.ts`
 - 120ms GATT settle delay between writes (`GATT_SETTLE_MS`)
 - Chunked response reassembly: buffer notifications until buffer ends with `}`
+- `BleTransportConfig.deviceNamePrefix` accepts `string | string[]` — `normalizePrefixes()` in `BleTransport.ts` coerces to `string[]` (defaults to `[DEVICE_NAME_PREFIX]`). Internally stored as `deviceNamePrefixes: string[]` in `ResolvedConfig`
 
 ## Key Patterns and Gotchas
 

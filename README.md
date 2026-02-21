@@ -334,7 +334,7 @@ await destroyServices();
 BleConnectionState    // 'disconnected' | 'scanning' | 'connecting' | 'connected'
 DiscoveredDevice      // { id, name, rssi }
 ConnectedDeviceInfo   // { id, name, mtu }
-BleTransportConfig    // { deviceNamePrefix?, scanTimeoutMs?, gattSettleMs?, connectionTimeoutMs?, requestedMtu? }
+BleTransportConfig    // { deviceNamePrefix?: string | string[], scanTimeoutMs?, gattSettleMs?, connectionTimeoutMs?, requestedMtu? }
 BleTransportEvents    // Event map: response, status, connectionStateChanged, deviceDiscovered, scanStopped, error
 
 // Protocol
@@ -508,7 +508,7 @@ Your ESP32 must be running [esp_wifi_manager](https://github.com/tuanpmt/esp_wif
 | Status characteristic | `0xFFE1` -- Read, Notify |
 | Command characteristic | `0xFFE2` -- Write |
 | Response characteristic | `0xFFE3` -- Read, Notify |
-| Device name prefix | `ESP32-WiFi-` (configurable via `BleTransportConfig.deviceNamePrefix`) |
+| Device name prefix | `ESP32-WiFi-` by default. Configurable via `BleTransportConfig.deviceNamePrefix` (accepts a single string or an array of strings to match multiple prefixes) |
 | Protocol | JSON command/response envelopes over BLE GATT |
 
 The device must expose all three characteristics under the service UUID. The library validates this on connection and will throw a descriptive error if any are missing.

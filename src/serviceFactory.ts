@@ -26,20 +26,23 @@ let storedConfig: ProvisioningConfig | undefined;
 /**
  * Create all four services in dependency order and wire them together.
  *
- * Idempotent: if services already exist they are destroyed first, then
- * re-created with the (optionally updated) config.
+ * Idempotent: if services already exist this is a no-op.  Call
+ * `destroyServices()` first to force re-creation.
+ *
+ * Synchronous — all four constructors are sync.  This avoids the race
+ * condition where callers that don't `await` would see null references.
  */
 function initializeServices(config?: ProvisioningConfig): void {
-  if (transport) {
-    destroyServices();
+  if (transport) return; // already initialized
+
+  if (config !== undefined) {
+    storedConfig = config;
   }
 
-  storedConfig = config;
-
-  transport = new BleTransport(config?.ble);
-  protocol = new DeviceProtocol(transport, config?.protocol);
+  transport = new BleTransport(storedConfig?.ble);
+  protocol = new DeviceProtocol(transport, storedConfig?.protocol);
   poller = new ConnectionPoller(protocol);
-  manager = new ProvisioningManager(transport, protocol, poller, config);
+  manager = new ProvisioningManager(transport, protocol, poller, storedConfig);
 }
 
 // ── Lazy accessors ────────────────────────────────────────────────────────
@@ -79,25 +82,29 @@ export function getManager(): ProvisioningManager {
 // ── Teardown ──────────────────────────────────────────────────────────────
 
 /**
- * Destroy all services in reverse dependency order and null out references.
+ * Destroy all services in reverse dependency order.
+ *
+ * References are nulled synchronously so that `initializeServices` can
+ * create fresh instances immediately, even while the async BLE teardown
+ * (BleManager.destroy()) is still settling in the background.
  */
-export function destroyServices(): void {
-  if (manager) {
-    manager.destroy();
-    manager = null;
-  }
-  if (poller) {
-    poller.destroy();
-    poller = null;
-  }
-  if (protocol) {
-    protocol.destroy();
-    protocol = null;
-  }
-  if (transport) {
-    void transport.destroy();
-    transport = null;
-  }
+export async function destroyServices(): Promise<void> {
+  const prevManager = manager;
+  const prevPoller = poller;
+  const prevProtocol = protocol;
+  const prevTransport = transport;
+
+  // Null out immediately — unblocks re-initialization
+  manager = null;
+  poller = null;
+  protocol = null;
+  transport = null;
+
+  // Async teardown in reverse dependency order
+  if (prevManager) await prevManager.destroy();
+  if (prevPoller) prevPoller.destroy();
+  if (prevProtocol) prevProtocol.destroy();
+  if (prevTransport) await prevTransport.destroy();
 }
 
 export { initializeServices };

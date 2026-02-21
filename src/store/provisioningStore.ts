@@ -333,8 +333,11 @@ export const useProvisioningStore = create<
     }
     unsubscribers = [];
 
-    // Tear down services
-    destroyServices();
+    // Tear down services.  destroyServices() is async (BLE teardown), but
+    // we reset store state immediately so the UI updates without waiting.
+    // The BleTransport._destroyed flag prevents stale native callbacks from
+    // surfacing after this point.
+    void destroyServices();
 
     // Reset store state
     set(initialState);

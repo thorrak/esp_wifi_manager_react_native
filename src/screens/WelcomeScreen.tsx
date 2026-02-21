@@ -28,7 +28,7 @@ export function WelcomeScreen({ theme }: WelcomeScreenProps) {
   const borderRadius = theme?.borderRadius ?? 12;
 
   const { scanForDevices, provisioningError } = useProvisioning();
-  const { scanning } = useDeviceScanner();
+  const { scanning, bleError } = useDeviceScanner();
 
   return (
     <View style={[styles.container, { backgroundColor: c.background }]}>
@@ -49,7 +49,7 @@ export function WelcomeScreen({ theme }: WelcomeScreenProps) {
           Connect to your ESP32 device to configure WiFi
         </Text>
 
-        <ErrorBanner message={provisioningError} theme={theme} />
+        <ErrorBanner message={provisioningError ?? bleError} theme={theme} />
 
         {scanning ? (
           <LoadingSpinner message="Searching for devices..." theme={theme} />

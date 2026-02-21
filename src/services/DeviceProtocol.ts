@@ -211,9 +211,20 @@ export class DeviceProtocol extends TypedEventEmitter<DeviceProtocolEvents> {
     log.debug('destroy');
     this.transport.off('response', this.handleResponse);
 
-    if (this.pendingReject) {
-      this.settlePending(null, new Error('DeviceProtocol destroyed'));
+    // Abandon any in-flight command without rejecting — this is a controlled
+    // teardown, not an error.  Calling reject() here would surface as an
+    // unhandled promise rejection when the caller (store action / UI) has
+    // already moved on.  Incrementing the nonce invalidates any outstanding
+    // writeCommand .catch() handler so it won't call settlePending later.
+    if (this.pendingCommand) {
+      log.debug('Abandoning pending command during destroy:', this.pendingCommand);
     }
+    this.commandNonce++;
+    this.clearTimeout();
+    this.pendingResolve = null;
+    this.pendingReject = null;
+    this.pendingCommand = null;
+    this._busy = false;
 
     this.removeAllListeners();
   }

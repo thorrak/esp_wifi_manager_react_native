@@ -104,44 +104,45 @@ export function NetworkScanScreen({ theme }: NetworkScanScreenProps) {
       {busy ? (
         <LoadingSpinner message="Scanning for networks..." theme={theme} />
       ) : (
-        <FlatList
-          data={scannedNetworks}
-          keyExtractor={(item, idx) => `${item.ssid}-${idx}`}
-          renderItem={renderNetwork}
-          contentContainerStyle={styles.listContent}
-          ListEmptyComponent={
-            <View style={styles.emptyContainer}>
-              <Text style={[styles.emptyText, { color: c.textSecondary }]}>
-                No WiFi networks found. Try scanning again.
-              </Text>
-            </View>
-          }
-        />
-      )}
+        <>
+          <FlatList
+            data={scannedNetworks}
+            keyExtractor={(item, idx) => `${item.ssid}-${idx}`}
+            renderItem={renderNetwork}
+            contentContainerStyle={styles.listContent}
+            ListEmptyComponent={
+              <View style={styles.emptyContainer}>
+                <Text style={[styles.emptyText, { color: c.textSecondary }]}>
+                  No WiFi networks found. Try scanning again.
+                </Text>
+              </View>
+            }
+          />
 
-      <View style={styles.footer}>
-        <TouchableOpacity
-          style={[
-            styles.scanButton,
-            {
-              borderColor: c.primary,
-              borderRadius,
-            },
-          ]}
-          onPress={scanWifiNetworks}
-          disabled={busy}
-          activeOpacity={0.8}
-        >
-          <Text
-            style={[
-              styles.scanButtonText,
-              { color: busy ? c.textSecondary : c.primary },
-            ]}
-          >
-            Scan Again
-          </Text>
-        </TouchableOpacity>
-      </View>
+          <View style={styles.footer}>
+            <TouchableOpacity
+              style={[
+                styles.scanButton,
+                {
+                  borderColor: c.primary,
+                  borderRadius,
+                },
+              ]}
+              onPress={scanWifiNetworks}
+              activeOpacity={0.8}
+            >
+              <Text
+                style={[
+                  styles.scanButtonText,
+                  { color: c.primary },
+                ]}
+              >
+                Scan Again
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </>
+      )}
     </View>
   );
 }
@@ -197,7 +198,8 @@ const styles = StyleSheet.create({
   },
   footer: {
     paddingHorizontal: 16,
-    paddingVertical: 16,
+    paddingTop: 16,
+    paddingBottom: 68,
   },
   scanButton: {
     paddingVertical: 14,

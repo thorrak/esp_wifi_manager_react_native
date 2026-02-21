@@ -434,23 +434,32 @@ describe('DeviceProtocol', () => {
   // --------------------------------------------------------------------------
 
   describe('destroy()', () => {
-    it('rejects pending command on destroy', async () => {
+    it('abandons pending command on destroy (no unhandled rejection)', async () => {
       const promise = protocol.sendCommand('get_status');
       await jest.advanceTimersByTimeAsync(0);
 
-      protocol.destroy();
+      // Attach a catch handler so the abandoned promise doesn't trigger
+      // unhandledRejection if it were to reject.
+      let settled = false;
+      promise.then(
+        () => { settled = true; },
+        () => { settled = true; },
+      );
 
-      await expect(promise).rejects.toThrow('DeviceProtocol destroyed');
+      protocol.destroy();
+      await jest.advanceTimersByTimeAsync(0);
+
+      // The promise should NOT have settled — it was abandoned, not rejected.
+      expect(settled).toBe(false);
     });
 
     it('clears busy state on destroy', async () => {
-      const promise = protocol.sendCommand('get_status');
+      protocol.sendCommand('get_status');
       await jest.advanceTimersByTimeAsync(0);
 
       expect(protocol.isBusy).toBe(true);
 
       protocol.destroy();
-      await promise.catch(() => {});
 
       expect(protocol.isBusy).toBe(false);
     });
@@ -460,11 +469,10 @@ describe('DeviceProtocol', () => {
     });
 
     it('stray response after destroy does not throw', async () => {
-      const promise = protocol.sendCommand('get_status');
+      protocol.sendCommand('get_status');
       await jest.advanceTimersByTimeAsync(0);
 
       protocol.destroy();
-      await promise.catch(() => {});
 
       // This should be a no-op because the listener was unsubscribed.
       expect(() =>

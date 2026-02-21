@@ -147,29 +147,24 @@ The fastest way to get WiFi provisioning working. `ProvisioningNavigator` render
 
 > **Note:** `ProvisioningNavigator` is exported from a separate entry point to avoid requiring `@react-navigation` for hooks-only users.
 
-### With React Navigation (classic)
-
 ```tsx
-import { NavigationContainer } from '@react-navigation/native';
 import { ProvisioningNavigator } from 'esp-wifi-manager-react-native/navigation';
 
 function App() {
   return (
-    <NavigationContainer>
-      <ProvisioningNavigator
-        onComplete={(result) => {
-          console.log('Provisioned!', result.ssid, result.ip);
-        }}
-        onDismiss={() => console.log('User dismissed')}
-      />
-    </NavigationContainer>
+    <ProvisioningNavigator
+      onComplete={(result) => {
+        console.log('Provisioned!', result.ssid, result.ip);
+      }}
+      onDismiss={() => console.log('User dismissed')}
+    />
   );
 }
 ```
 
-### With Expo Router
+`ProvisioningNavigator` manages its own `NavigationContainer` (wrapped in `NavigationIndependentTree`), so it works anywhere — including inside Expo Router or an existing React Navigation tree — without conflicting with your app's navigator.
 
-Expo Router provides its own `NavigationContainer`, so you should **not** wrap `ProvisioningNavigator` in one. Instead, render it inside a route:
+### With Expo Router
 
 ```tsx
 // app/provision.tsx
@@ -197,7 +192,7 @@ import { useProvisioning, useDeviceScanner } from 'esp-wifi-manager-react-native
 
 export default function ProvisionScreen() {
   const { step, scannedNetworks, scanForDevices, connectToDevice, submitCredentials } = useProvisioning();
-  const { discoveredDevices, scanning, startScan } = useDeviceScanner();
+  const { discoveredDevices, scanning, bleError, startScan } = useDeviceScanner();
 
   // Build your own UI and handle navigation with expo-router...
 }
@@ -248,7 +243,7 @@ function MyProvisioningScreen() {
 | Hook | Purpose |
 |------|---------|
 | `useProvisioning` | Full wizard state machine: step, networks, actions (scanForDevices, connectToDevice, selectNetwork, submitCredentials, reset, etc.) |
-| `useDeviceScanner` | BLE device discovery: discoveredDevices, scanning, startScan, stopScan |
+| `useDeviceScanner` | BLE device discovery: discoveredDevices, scanning, bleError, startScan, stopScan |
 | `useBleConnection` | BLE connection management: connectionState, deviceName, deviceId, connectToDevice, disconnectDevice |
 | `useWifiStatus` | WiFi state from the device: wifiState, wifiSsid, wifiIp, wifiRssi, wifiQuality, polling, pollOnce |
 | `useDeviceProtocol` | Direct access to all device commands: getStatus, scanNetworks, addNetwork, delNetwork, connectWifi, startAp, stopAp, getVar, setVar, factoryReset |
@@ -319,14 +314,15 @@ import {
   destroyServices,
 } from 'esp-wifi-manager-react-native';
 
-// Optional: pass config before first access
+// Optional: pass config before first access.
+// Idempotent — call destroyServices() first to force re-creation.
 initializeServices({ ble: { scanTimeoutMs: 20000 } });
 
 const transport = getTransport();
 const protocol = getProtocol();
 
-// When done
-destroyServices();
+// When done (async — awaits BLE teardown)
+await destroyServices();
 ```
 
 ## API Reference

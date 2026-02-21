@@ -135,7 +135,7 @@ export class ProvisioningManager extends TypedEventEmitter<ProvisioningManagerEv
       }
 
       await this.transport.startScan();
-      this.setStep('welcome');
+      this.setStep('connect');
     } catch (err: unknown) {
       const error = err instanceof Error ? err : new Error(String(err));
       log.error('scanForDevices failed:', error.message);
@@ -164,7 +164,10 @@ export class ProvisioningManager extends TypedEventEmitter<ProvisioningManagerEv
       return;
     }
 
-    // Connection succeeded — trigger WiFi scan automatically.
+    // Connection succeeded — show the networks screen (with loading spinner)
+    // before starting the WiFi scan so the user gets immediate feedback.
+    this.setStep('networks');
+
     try {
       await this.scanWifiNetworks();
     } catch (err: unknown) {

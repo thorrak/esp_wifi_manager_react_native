@@ -214,7 +214,8 @@ const styles = StyleSheet.create({
   },
   footer: {
     paddingHorizontal: 16,
-    paddingVertical: 16,
+    paddingTop: 16,
+    paddingBottom: 68,
   },
   scanButton: {
     paddingVertical: 14,

@@ -94,6 +94,9 @@ export class BleTransport extends TypedEventEmitter<BleTransportEvents> {
   // ── Deduplication for scan results ───────────────────────────────────
   private discoveredDeviceIds = new Set<string>();
 
+  // ── Teardown guard ────────────────────────────────────────────────────
+  private _destroyed = false;
+
   // ────────────────────────────────────────────────────────────────────
   // Constructor
   // ────────────────────────────────────────────────────────────────────
@@ -153,6 +156,9 @@ export class BleTransport extends TypedEventEmitter<BleTransportEvents> {
     this.discoveredDeviceIds.clear();
     this.setConnectionState('scanning');
 
+    const allSeenIds = new Set<string>();
+    const seenNames = new Map<string, string | null>();
+
     this.bleManager.startDeviceScan(null, null, (error: BleError | null, device: Device | null) => {
       if (error) {
         log.error('Scan error:', error.message);
@@ -168,6 +174,14 @@ export class BleTransport extends TypedEventEmitter<BleTransportEvents> {
       }
 
       const name = device.name ?? device.localName;
+
+      // Track all unique devices for diagnostics
+      if (!allSeenIds.has(device.id)) {
+        allSeenIds.add(device.id);
+        seenNames.set(device.id, name ?? null);
+        log.debug('Scan saw device:', { id: device.id, name, rssi: device.rssi });
+      }
+
       if (!name || !name.startsWith(this.config.deviceNamePrefix)) {
         return;
       }
@@ -190,7 +204,27 @@ export class BleTransport extends TypedEventEmitter<BleTransportEvents> {
 
     // Auto-stop after timeout.
     this.scanTimeoutId = setTimeout(() => {
-      log.info('Scan timeout reached');
+      const matched = this.discoveredDeviceIds.size;
+      const total = allSeenIds.size;
+      log.info(`Scan timeout: saw ${total} device(s), ${matched} matched prefix "${this.config.deviceNamePrefix}"`);
+
+      // Surface diagnostic info as an error when no devices matched
+      if (matched === 0 && total > 0) {
+        const names = Array.from(seenNames.values())
+          .filter((n): n is string => n !== null)
+          .slice(0, 5)
+          .join(', ');
+        this.emit(
+          'error',
+          new Error(
+            `Found ${total} BLE device(s) but none matched name prefix "${this.config.deviceNamePrefix}". ` +
+            `Names seen: [${names || '(all unnamed)'}]`,
+          ),
+        );
+      } else if (total === 0) {
+        this.emit('error', new Error('BLE scan found 0 devices. Is Bluetooth working?'));
+      }
+
       this.stopScan();
     }, this.config.scanTimeoutMs);
   }
@@ -282,6 +316,7 @@ export class BleTransport extends TypedEventEmitter<BleTransportEvents> {
         SERVICE_UUID,
         RESPONSE_CHAR_UUID,
         (error: BleError | null, characteristic: Characteristic | null) => {
+          if (this._destroyed) return;
           if (error) {
             log.error('Response notification error:', error.message);
             this.emit('error', new Error(`Response notification error: ${error.message}`));
@@ -299,6 +334,7 @@ export class BleTransport extends TypedEventEmitter<BleTransportEvents> {
         SERVICE_UUID,
         STATUS_CHAR_UUID,
         (error: BleError | null, characteristic: Characteristic | null) => {
+          if (this._destroyed) return;
           if (error) {
             log.error('Status notification error:', error.message);
             this.emit('error', new Error(`Status notification error: ${error.message}`));
@@ -387,7 +423,7 @@ export class BleTransport extends TypedEventEmitter<BleTransportEvents> {
   // ────────────────────────────────────────────────────────────────────
 
   async writeCommand(jsonString: string): Promise<void> {
-    if (!this.device || this._connectionState !== 'connected') {
+    if (this._destroyed || !this.device || this._connectionState !== 'connected') {
       throw new Error('Cannot write command: not connected');
     }
 
@@ -424,6 +460,9 @@ export class BleTransport extends TypedEventEmitter<BleTransportEvents> {
 
   async destroy(): Promise<void> {
     log.info('Destroying BleTransport');
+    this._destroyed = true;
+
+    this.removeAllListeners();
 
     await this.disconnect();
 
@@ -432,8 +471,16 @@ export class BleTransport extends TypedEventEmitter<BleTransportEvents> {
       this.bleStateSubscription = null;
     }
 
-    this.removeAllListeners();
-    this.bleManager.destroy();
+    // BleManager.destroy() is async — it awaits destroyClient() internally
+    // and then rejects any remaining active _callPromise() promises.  If the
+    // native destroyClient() call fails (e.g. because the BLE stack is in a
+    // transitional state after disconnect), the returned promise rejects.
+    // We must await and catch to prevent unhandled promise rejections.
+    try {
+      await this.bleManager.destroy();
+    } catch (err) {
+      log.debug('Ignoring BleManager.destroy() error:', err);
+    }
 
     log.info('BleTransport destroyed');
   }

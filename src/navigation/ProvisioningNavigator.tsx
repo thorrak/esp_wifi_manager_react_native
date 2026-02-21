@@ -1,5 +1,7 @@
 import { useEffect, useRef, createContext, useContext } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { NavigationContainer, createNavigationContainerRef } from '@react-navigation/native';
+import { NavigationIndependentTree } from '@react-navigation/core';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import type {
   ProvisioningTheme,
@@ -192,7 +194,7 @@ export function ProvisioningNavigator({
   const destroy = useProvisioningStore((s) => s.destroy);
   const disconnectDevice = useProvisioningStore((s) => s.disconnectDevice);
 
-  const navigationRef = useRef<any>(null);
+  const navigationRef = useRef(createNavigationContainerRef<RootStackParamList>());
 
   // Initialize services on mount, destroy on unmount
   useEffect(() => {
@@ -206,12 +208,15 @@ export function ProvisioningNavigator({
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Navigate when step changes
+  // Navigate when step changes (skip the initial mount — initialRouteName handles that)
+  const prevStepRef = useRef(step);
   useEffect(() => {
+    if (prevStepRef.current === step) return;
+    prevStepRef.current = step;
+
     const screenName = stepToScreenName(step);
-    if (navigationRef.current) {
-      const nav = navigationRef.current;
-      // Use reset to avoid stacking screens
+    const nav = navigationRef.current;
+    if (nav.isReady()) {
       try {
         nav.reset({
           index: 0,
@@ -233,9 +238,9 @@ export function ProvisioningNavigator({
 
   return (
     <NavigatorContext.Provider value={contextValue}>
+      <NavigationIndependentTree>
+      <NavigationContainer ref={navigationRef.current}>
       <Stack.Navigator
-        // @ts-expect-error -- navigator ref typing varies between RN Nav versions
-        ref={navigationRef}
         initialRouteName={SCREEN_NAMES.Welcome}
         screenOptions={{
           headerStyle: {
@@ -333,6 +338,8 @@ export function ProvisioningNavigator({
           options={{ title: 'Manage Device' }}
         />
       </Stack.Navigator>
+      </NavigationContainer>
+      </NavigationIndependentTree>
     </NavigatorContext.Provider>
   );
 }

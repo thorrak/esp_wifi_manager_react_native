@@ -168,6 +168,13 @@ export class BleTransport extends TypedEventEmitter<BleTransportEvents> {
 
     this.bleManager.startDeviceScan(null, null, (error: BleError | null, device: Device | null) => {
       if (error) {
+        // stopDeviceScan() on Android can fire the callback one last time
+        // with "Operation was cancelled" — this is expected, not an error.
+        if (/cancelled|canceled/i.test(error.message)) {
+          log.debug('Scan cancelled (expected):', error.message);
+          return;
+        }
+
         log.error('Scan error:', error.message);
         const isUnauthorized =
           /not authorized|BluetoothLE/i.test(error.message);

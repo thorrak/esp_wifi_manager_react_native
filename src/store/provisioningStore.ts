@@ -31,7 +31,10 @@ import type {
   StartApParams,
   BleConnectionState,
   DiscoveredDevice,
+  BleErrorCode,
 } from '../types';
+
+import { BleLibraryError } from '../types/ble';
 
 // ---------------------------------------------------------------------------
 // State interface
@@ -45,6 +48,7 @@ export interface ProvisioningStoreState {
   discoveredDevices: DiscoveredDevice[];
   scanning: boolean;
   bleError: string | null;
+  bleErrorCode: BleErrorCode | null;
 
   // Protocol slice
   busy: boolean;
@@ -127,6 +131,7 @@ const initialState: ProvisioningStoreState = {
   discoveredDevices: [],
   scanning: false,
   bleError: null,
+  bleErrorCode: null,
 
   // Protocol
   busy: false,
@@ -202,7 +207,8 @@ function subscribeToServices(
 
   unsubscribers.push(
     transport.on('error', (err: Error) => {
-      set({ bleError: err.message });
+      const bleErrorCode = err instanceof BleLibraryError ? err.code : null;
+      set({ bleError: err.message, bleErrorCode });
     }),
   );
 
@@ -349,7 +355,7 @@ export const useProvisioningStore = create<
 
   startScan: () => {
     ensureInitialized(set);
-    set({ discoveredDevices: [], scanning: true, bleError: null });
+    set({ discoveredDevices: [], scanning: true, bleError: null, bleErrorCode: null });
     getManager().scanForDevices();
   },
 
@@ -451,7 +457,7 @@ export const useProvisioningStore = create<
 
   provisioningScanForDevices: () => {
     ensureInitialized(set);
-    set({ discoveredDevices: [], scanning: true, bleError: null });
+    set({ discoveredDevices: [], scanning: true, bleError: null, bleErrorCode: null });
     getManager().scanForDevices();
   },
 

@@ -193,14 +193,15 @@ describe('ProvisioningManager', () => {
       expect(transport.startScan).toHaveBeenCalledTimes(1);
     });
 
-    it('keeps step at "welcome"', async () => {
+    it('advances step to "connect" after successful scan', async () => {
       const steps: ProvisioningStep[] = [];
       manager.on('stepChanged', (step) => steps.push(step));
 
       await manager.scanForDevices();
 
-      // Step should remain 'welcome' — no step change emitted since it's already welcome.
-      expect(manager.currentStep).toBe('welcome');
+      // After a successful scan, step advances to 'connect'.
+      expect(manager.currentStep).toBe('connect');
+      expect(steps).toContain('connect');
     });
 
     it('disconnects first if currently connected', async () => {

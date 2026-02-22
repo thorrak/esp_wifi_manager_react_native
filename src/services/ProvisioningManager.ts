@@ -26,6 +26,7 @@ import {
 
 import { TypedEventEmitter, createLogger } from '../utils';
 
+import { BleLibraryError } from '../types/ble';
 import type { BleTransport } from './BleTransport';
 import type { DeviceProtocol } from './DeviceProtocol';
 import type { ConnectionPoller } from './ConnectionPoller';
@@ -76,6 +77,7 @@ export class ProvisioningManager extends TypedEventEmitter<ProvisioningManagerEv
 
   // -- Event unsubscribe handles --------------------------------------------
   private unsubscribeTransport: (() => void) | null = null;
+  private unsubscribeTransportError: (() => void) | null = null;
   private unsubscribePollerSucceeded: (() => void) | null = null;
   private unsubscribePollerFailed: (() => void) | null = null;
   private unsubscribePollerTimedOut: (() => void) | null = null;
@@ -407,6 +409,21 @@ export class ProvisioningManager extends TypedEventEmitter<ProvisioningManagerEv
       },
     );
 
+    // Transport: watch for BLE errors that should abort scanning and
+    // return to the welcome screen (e.g. permission denied, adapter off).
+    this.unsubscribeTransportError = this.transport.on(
+      'error',
+      (err: Error) => {
+        if (
+          err instanceof BleLibraryError &&
+          (this._step === 'connect' || this._step === 'welcome')
+        ) {
+          log.warn('BLE error during scan (returning to welcome):', err.code, err.message);
+          this.setStep('welcome');
+        }
+      },
+    );
+
     // Poller: WiFi connection succeeded.
     this.unsubscribePollerSucceeded = this.poller.on(
       'connectionSucceeded',
@@ -451,6 +468,9 @@ export class ProvisioningManager extends TypedEventEmitter<ProvisioningManagerEv
   private unsubscribeFromServices(): void {
     this.unsubscribeTransport?.();
     this.unsubscribeTransport = null;
+
+    this.unsubscribeTransportError?.();
+    this.unsubscribeTransportError = null;
 
     this.unsubscribePollerSucceeded?.();
     this.unsubscribePollerSucceeded = null;

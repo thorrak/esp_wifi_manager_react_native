@@ -49,15 +49,15 @@ describe('serviceFactory', () => {
       expect(getManager()).toBeInstanceOf(ProvisioningManager);
     });
 
-    it('is idempotent -- calling twice returns the same type of instances', () => {
+    it('is idempotent -- calling twice returns the same instances', () => {
       initializeServices();
       const t1 = getTransport();
       const p1 = getProtocol();
       const c1 = getPoller();
       const m1 = getManager();
 
-      // Second call destroys old instances and creates new ones
-      // (per the implementation: if transport exists, destroyServices() is called first).
+      // Second call is a no-op — services already exist.
+      // (Call destroyServices() first to force re-creation.)
       initializeServices();
       const t2 = getTransport();
       const p2 = getProtocol();
@@ -70,11 +70,11 @@ describe('serviceFactory', () => {
       expect(c2).toBeInstanceOf(ConnectionPoller);
       expect(m2).toBeInstanceOf(ProvisioningManager);
 
-      // They should be new instances since initializeServices destroys and re-creates.
-      expect(t2).not.toBe(t1);
-      expect(p2).not.toBe(p1);
-      expect(c2).not.toBe(c1);
-      expect(m2).not.toBe(m1);
+      // Same instances — initializeServices is a no-op when already initialized.
+      expect(t2).toBe(t1);
+      expect(p2).toBe(p1);
+      expect(c2).toBe(c1);
+      expect(m2).toBe(m1);
     });
   });
 

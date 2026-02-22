@@ -1,6 +1,7 @@
 // ── Types ──
 export type {
   // BLE
+  BleErrorCode,
   BleConnectionState,
   DiscoveredDevice,
   ConnectedDeviceInfo,
@@ -37,6 +38,8 @@ export type {
   ProvisioningTheme,
   ProvisioningManagerEvents,
 } from './types';
+
+export { BleLibraryError } from './types/ble';
 
 // ── Constants ──
 export {

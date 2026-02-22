@@ -27,6 +27,8 @@ import type {
   BleTransportConfig,
 } from '../types';
 
+import { BleLibraryError } from '../types/ble';
+
 import {
   SERVICE_UUID,
   STATUS_CHAR_UUID,
@@ -167,7 +169,12 @@ export class BleTransport extends TypedEventEmitter<BleTransportEvents> {
     this.bleManager.startDeviceScan(null, null, (error: BleError | null, device: Device | null) => {
       if (error) {
         log.error('Scan error:', error.message);
-        this.emit('error', new Error(`BLE scan error: ${error.message}`));
+        const isUnauthorized =
+          /not authorized|BluetoothLE/i.test(error.message);
+        const scanErr = isUnauthorized
+          ? new BleLibraryError('unauthorized', `BLE scan error: ${error.message}`)
+          : new BleLibraryError('scan_error', `BLE scan error: ${error.message}`);
+        this.emit('error', scanErr);
         this.stopScanInternal();
         this.setConnectionState('disconnected');
         this.emit('scanStopped');
@@ -550,11 +557,27 @@ export class BleTransport extends TypedEventEmitter<BleTransportEvents> {
         return true;
       }
 
-      if (state === State.PoweredOff || state === State.Unauthorized) {
-        log.error('BLE adapter unavailable:', state);
+      if (state === State.Unauthorized) {
+        log.error('BLE adapter unauthorized:', state);
         this.setConnectionState('disconnected');
         this.emit('scanStopped');
-        this.emit('error', new Error(`Bluetooth is ${state}`));
+        this.emit('error', new BleLibraryError('unauthorized', `Bluetooth is ${state}`));
+        return false;
+      }
+
+      if (state === State.PoweredOff) {
+        log.error('BLE adapter powered off:', state);
+        this.setConnectionState('disconnected');
+        this.emit('scanStopped');
+        this.emit('error', new BleLibraryError('powered_off', `Bluetooth is ${state}`));
+        return false;
+      }
+
+      if (state === State.Unsupported) {
+        log.error('BLE adapter unsupported:', state);
+        this.setConnectionState('disconnected');
+        this.emit('scanStopped');
+        this.emit('error', new BleLibraryError('unsupported', `Bluetooth is ${state}`));
         return false;
       }
 
@@ -566,7 +589,7 @@ export class BleTransport extends TypedEventEmitter<BleTransportEvents> {
     log.error('Timed out waiting for BLE adapter to power on');
     this.setConnectionState('disconnected');
     this.emit('scanStopped');
-    this.emit('error', new Error('Bluetooth adapter did not become ready'));
+    this.emit('error', new BleLibraryError('adapter_timeout', 'Bluetooth adapter did not become ready'));
     return false;
   }
 

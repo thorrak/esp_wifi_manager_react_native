@@ -1,3 +1,21 @@
+export type BleErrorCode =
+  | 'unauthorized'
+  | 'powered_off'
+  | 'unsupported'
+  | 'scan_error'
+  | 'adapter_timeout'
+  | 'unknown';
+
+export class BleLibraryError extends Error {
+  readonly code: BleErrorCode;
+
+  constructor(code: BleErrorCode, message: string) {
+    super(message);
+    this.name = 'BleLibraryError';
+    this.code = code;
+  }
+}
+
 export type BleConnectionState =
   | 'disconnected'
   | 'scanning'

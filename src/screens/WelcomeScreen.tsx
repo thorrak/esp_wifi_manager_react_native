@@ -1,5 +1,5 @@
 /* react-jsx transform */
-import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Linking } from 'react-native';
 import type { ProvisioningTheme } from '../types';
 import { useProvisioning } from '../hooks/useProvisioning';
 import { useDeviceScanner } from '../hooks/useDeviceScanner';
@@ -28,7 +28,7 @@ export function WelcomeScreen({ theme }: WelcomeScreenProps) {
   const borderRadius = theme?.borderRadius ?? 12;
 
   const { scanForDevices, provisioningError } = useProvisioning();
-  const { scanning, bleError } = useDeviceScanner();
+  const { scanning, bleError, bleErrorCode } = useDeviceScanner();
 
   return (
     <View style={[styles.container, { backgroundColor: c.background }]}>
@@ -50,6 +50,21 @@ export function WelcomeScreen({ theme }: WelcomeScreenProps) {
         </Text>
 
         <ErrorBanner message={provisioningError ?? bleError} theme={theme} />
+
+        {bleErrorCode === 'unauthorized' && !scanning && (
+          <TouchableOpacity
+            style={[
+              styles.settingsButton,
+              { borderColor: c.primary, borderRadius },
+            ]}
+            onPress={() => Linking.openSettings()}
+            activeOpacity={0.8}
+          >
+            <Text style={[styles.settingsButtonText, { color: c.primary }]}>
+              Open Settings
+            </Text>
+          </TouchableOpacity>
+        )}
 
         {scanning ? (
           <LoadingSpinner message="Searching for devices..." theme={theme} />
@@ -123,6 +138,18 @@ const styles = StyleSheet.create({
   },
   buttonText: {
     fontSize: 17,
+    fontWeight: '600',
+  },
+  settingsButton: {
+    width: '100%',
+    paddingVertical: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    marginBottom: 16,
+  },
+  settingsButtonText: {
+    fontSize: 16,
     fontWeight: '600',
   },
 });

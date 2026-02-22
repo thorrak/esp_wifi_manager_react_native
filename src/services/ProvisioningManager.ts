@@ -157,6 +157,11 @@ export class ProvisioningManager extends TypedEventEmitter<ProvisioningManagerEv
       this.transport.stopScan();
       this.setStep('connect');
 
+      // Let the BLE stack settle after stopping the scan — on Android,
+      // connectToDevice() can fail with "Operation was cancelled" if the
+      // native scan teardown hasn't fully completed.
+      await delay(DISCONNECT_SETTLE_MS);
+
       await this.transport.connect(deviceId);
     } catch (err: unknown) {
       const error = err instanceof Error ? err : new Error(String(err));

@@ -17,7 +17,7 @@ export const DEVICE_NAME_PREFIX = 'ESP32-WiFi-';
 export const GATT_SETTLE_MS = 120;
 
 /** Default scan timeout (ms) */
-export const DEFAULT_SCAN_TIMEOUT_MS = 15000;
+export const DEFAULT_SCAN_TIMEOUT_MS = 10000;
 
 /** Default connection timeout (ms) */
 export const DEFAULT_CONNECTION_TIMEOUT_MS = 10000;

@@ -123,7 +123,7 @@ src/
                                         # reassembly, GATT settle delay, base64 encode/decode.
                                         # Pure TypeScript class, no React dependency.
                                         # Emits: 'response', 'status', 'connectionStateChanged',
-                                        #        'deviceDiscovered', 'error'
+                                        #        'deviceDiscovered', 'scanStopped', 'error'
 
   # ── Layer 2: Device Protocol ────────────────────────────────
     DeviceProtocol.ts                   # JSON command/response protocol. Accepts a BleTransport.
@@ -332,6 +332,20 @@ src/
 ### `src/types/ble.ts`
 
 ```typescript
+// ── BLE Error Types ───────────────────────────────────────────
+export type BleErrorCode =
+  | 'unauthorized'
+  | 'powered_off'
+  | 'unsupported'
+  | 'scan_error'
+  | 'adapter_timeout'
+  | 'unknown';
+
+export class BleLibraryError extends Error {
+  readonly code: BleErrorCode;
+  constructor(code: BleErrorCode, message: string);
+}
+
 // ── BLE Connection State ──────────────────────────────────────
 export type BleConnectionState = 'disconnected' | 'scanning' | 'connecting' | 'connected';
 
@@ -343,8 +357,6 @@ export interface DiscoveredDevice {
   name: string;
   /** RSSI at discovery time */
   rssi: number;
-  /** Raw advertisement data (platform-specific) */
-  advertisementData?: Record<string, unknown>;
 }
 
 // ── Connected Device Info ─────────────────────────────────────
@@ -365,15 +377,17 @@ export interface BleTransportEvents {
   connectionStateChanged: (state: BleConnectionState) => void;
   /** New device discovered during scanning */
   deviceDiscovered: (device: DiscoveredDevice) => void;
+  /** Scan stopped (timeout, manual stop, or error) */
+  scanStopped: () => void;
   /** Transport-level error */
   error: (error: Error) => void;
 }
 
 // ── BLE Transport Configuration ──────────────────────────────
 export interface BleTransportConfig {
-  /** Device name prefix to filter during scanning. Default: "ESP32-WiFi-" */
-  deviceNamePrefix?: string;
-  /** Scan timeout in ms. Default: 15000 */
+  /** Device name prefix(es) to filter during scanning. Default: "ESP32-WiFi-" */
+  deviceNamePrefix?: string | string[];
+  /** Scan timeout in ms. Default: 10000 */
   scanTimeoutMs?: number;
   /** Minimum delay between GATT writes in ms. Default: 120 */
   gattSettleMs?: number;
@@ -618,31 +632,26 @@ export interface ProvisioningManagerEvents {
 }
 ```
 
-### `src/types/store.ts`
+### Store types (in `src/store/provisioningStore.ts`)
 
 ```typescript
-import type { BleConnectionState, DiscoveredDevice, ConnectedDeviceInfo } from './ble';
-import type { CommandName } from './protocol';
-import type { WifiConnectionState, ScannedNetwork, WifiStatus } from './wifi';
-import type { ProvisioningStep, ProvisioningResult } from './provisioning';
-
 // ── Store State ──────────────────────────────────────────────
 
-export interface BleSlice {
+export interface ProvisioningStoreState {
+  // BLE
   connectionState: BleConnectionState;
   deviceName: string;
   deviceId: string | null;
   discoveredDevices: DiscoveredDevice[];
   scanning: boolean;
   bleError: string | null;
-}
+  bleErrorCode: BleErrorCode | null;
 
-export interface ProtocolSlice {
+  // Protocol
   busy: boolean;
   lastCommandError: string | null;
-}
 
-export interface PollerSlice {
+  // Poller
   wifiState: WifiConnectionState;
   wifiSsid: string;
   wifiIp: string;
@@ -651,58 +660,59 @@ export interface PollerSlice {
   polling: boolean;
   pollError: string | null;
   connectionFailed: boolean;
-}
 
-export interface ProvisioningSlice {
+  // Provisioning
   step: ProvisioningStep;
   selectedNetwork: ScannedNetwork | null;
   scannedNetworks: ScannedNetwork[];
   provisioningError: string | null;
 }
 
-export interface StoreState extends BleSlice, ProtocolSlice, PollerSlice, ProvisioningSlice {}
-
 // ── Store Actions ────────────────────────────────────────────
 
-export interface StoreActions {
-  // BLE actions
-  startScan: () => Promise<void>;
+export interface ProvisioningStoreActions {
+  // Lifecycle
+  initialize: (config?: ProvisioningConfig) => void;
+  destroy: () => void;
+
+  // BLE
+  startScan: () => void;
   stopScan: () => void;
   connectToDevice: (deviceId: string) => Promise<void>;
   disconnectDevice: () => void;
 
-  // Protocol actions (direct command access)
+  // Direct protocol commands
   getStatus: () => Promise<WifiStatus>;
   scanNetworks: () => Promise<ScannedNetwork[]>;
-  listNetworks: () => Promise<import('./wifi').SavedNetwork[]>;
-  addNetwork: (params: import('./protocol').AddNetworkParams) => Promise<void>;
+  listNetworks: () => Promise<SavedNetwork[]>;
+  addNetwork: (params: AddNetworkParams) => Promise<void>;
   delNetwork: (ssid: string) => Promise<void>;
   connectWifi: (ssid?: string) => Promise<void>;
   disconnectWifi: () => Promise<void>;
-  getApStatus: () => Promise<import('./wifi').ApStatus>;
-  startAp: (params?: import('./protocol').StartApParams) => Promise<void>;
+  getApStatus: () => Promise<ApStatus>;
+  startAp: (params?: StartApParams) => Promise<void>;
   stopAp: () => Promise<void>;
-  getVar: (key: string) => Promise<import('./wifi').DeviceVariable>;
+  getVar: (key: string) => Promise<DeviceVariable>;
   setVar: (key: string, value: string) => Promise<void>;
   factoryReset: () => Promise<void>;
 
-  // Provisioning flow actions
-  provisioningScanForDevices: () => Promise<void>;
+  // Provisioning flow
+  provisioningScanForDevices: () => void;
   provisioningConnectToDevice: (deviceId: string) => Promise<void>;
   provisioningScanWifiNetworks: () => Promise<void>;
   provisioningSelectNetwork: (network: ScannedNetwork) => void;
   provisioningSubmitCredentials: (password: string) => Promise<void>;
   provisioningRetryConnection: () => Promise<void>;
   provisioningDeleteNetworkAndReturn: () => Promise<void>;
+  provisioningGoToNetworks: () => void;
+  provisioningGoToManage: () => void;
   provisioningReset: () => void;
 
-  // Poller actions
+  // Poller
   startPolling: (timeoutMs?: number, intervalMs?: number) => void;
   stopPolling: () => void;
   pollOnce: () => Promise<WifiStatus>;
 }
-
-export type ProvisioningStore = StoreState & StoreActions;
 ```
 
 ---
@@ -715,7 +725,7 @@ Plain TypeScript class. Wraps `react-native-ble-plx` `BleManager`.
 
 ### Responsibilities
 
-1. **Scanning** -- starts/stops BLE scan filtered by device name prefix ("ESP32-WiFi-"). Emits `deviceDiscovered` for each matching peripheral. Auto-stops after timeout.
+1. **Scanning** -- starts/stops BLE scan filtered by one or more device name prefixes (default: "ESP32-WiFi-"). `deviceNamePrefix` accepts `string | string[]`, normalized internally to `string[]`. Emits `deviceDiscovered` for each matching peripheral, `scanStopped` when scan ends. Auto-stops after timeout.
 
 2. **Connecting** -- connects to a device by ID, negotiates MTU, discovers the provisioning service (0xFFE0) and its three characteristics. Stores characteristic references internally.
 
@@ -960,93 +970,41 @@ Single store that bridges all four service layers to React.
 ```typescript
 import { create } from 'zustand';
 
-export const useProvisioningStore = create<ProvisioningStore>((set, get) => {
-  // Lazy-init services on first action call
-  // Subscribe to service events and sync to store state
-
-  return {
+export const useProvisioningStore = create<ProvisioningStoreState & ProvisioningStoreActions>(
+  (set, get) => ({
     // ── Initial State ──
-    // BLE
-    connectionState: 'disconnected',
-    deviceName: '',
-    deviceId: null,
-    discoveredDevices: [],
-    scanning: false,
-    bleError: null,
-
-    // Protocol
-    busy: false,
-    lastCommandError: null,
-
-    // Poller
-    wifiState: 'disconnected',
-    wifiSsid: '',
-    wifiIp: '',
-    wifiRssi: 0,
-    wifiQuality: 0,
-    polling: false,
-    pollError: null,
-    connectionFailed: false,
-
-    // Provisioning
-    step: 'welcome',
-    selectedNetwork: null,
-    scannedNetworks: [],
-    provisioningError: null,
+    ...initialState,
 
     // ── Actions ──
+    // Lifecycle: initialize(config?), destroy()
+    // BLE: startScan(), stopScan(), connectToDevice(id), disconnectDevice()
+    // Protocol: getStatus(), scanNetworks(), listNetworks(), addNetwork(), ...
+    // Provisioning: provisioningScanForDevices(), provisioningConnectToDevice(id), ...
+    // Poller: startPolling(), stopPolling(), pollOnce()
+    //
     // Each action delegates to the appropriate service singleton
-    // and updates store state via set()
-    ...bleActions(set, get),
-    ...protocolActions(set, get),
-    ...pollerActions(set, get),
-    ...provisioningActions(set, get),
-  };
-});
+    // and updates store state via set().
+    // Service event subscriptions are set up lazily on first action call.
+  }),
+);
 ```
 
 ### Service Event Subscriptions
 
-When services are initialized, the store subscribes to their events:
+When services are initialized (lazily, on first action call), the store subscribes to their events. Key subscriptions:
 
-```typescript
-function subscribeToServices(set: SetState) {
-  const transport = getTransport();
-  const protocol = getProtocol();
-  const poller = getPoller();
-  const manager = getManager();
-
-  transport.on('connectionStateChanged', (state) =>
-    set({ connectionState: state })
-  );
-
-  transport.on('deviceDiscovered', (device) =>
-    set((s) => ({
-      discoveredDevices: [...s.discoveredDevices.filter(d => d.id !== device.id), device]
-    }))
-  );
-
-  protocol.on('busyChanged', (busy) => set({ busy }));
-
-  poller.on('wifiStateChanged', (status) =>
-    set({
-      wifiState: status.state,
-      wifiSsid: status.ssid,
-      wifiIp: status.ip,
-      wifiRssi: status.rssi,
-      wifiQuality: status.quality,
-    })
-  );
-
-  poller.on('connectionFailed', () => set({ connectionFailed: true }));
-  poller.on('connectionTimedOut', () => set({ pollError: 'Connection timed out' }));
-
-  manager.on('stepChanged', (step) => set({ step }));
-  manager.on('scannedNetworksUpdated', (networks) => set({ scannedNetworks: networks }));
-  manager.on('selectedNetworkChanged', (network) => set({ selectedNetwork: network }));
-  manager.on('provisioningError', (error) => set({ provisioningError: error }));
-}
-```
+- `transport.connectionStateChanged` -> updates `connectionState`
+- `transport.deviceDiscovered` -> appends/replaces device in `discoveredDevices`
+- `transport.scanStopped` -> sets `scanning: false`
+- `transport.error` -> sets `bleError` and `bleErrorCode` (if `BleLibraryError`)
+- `protocol.busyChanged` -> updates `busy`
+- `poller.wifiStateChanged` -> updates wifi fields (`wifiState`, `wifiSsid`, `wifiIp`, etc.)
+- `poller.connectionFailed` -> sets `connectionFailed: true`
+- `poller.connectionTimedOut` -> sets `pollError: 'Connection timed out'`
+- `manager.stepChanged` -> updates `step`; also syncs `polling` flag on `'connecting'`
+- `manager.scannedNetworksUpdated` -> updates `scannedNetworks`
+- `manager.selectedNetworkChanged` -> updates `selectedNetwork`
+- `manager.provisioningError` -> updates `provisioningError`
 
 ---
 
@@ -1329,34 +1287,9 @@ interface ProvisioningNavigatorProps {
 }
 ```
 
-**Navigation is driven by step state.** The navigator subscribes to `step` from the store and uses `navigation.navigate()` to switch screens. This mirrors the Vue pattern where composables drive `router.push()`, but decouples the logic from the navigation library.
+**Navigation is driven by step state.** The navigator subscribes to `step` from the store and uses `navigationRef.reset()` to switch screens (reset avoids back-stack accumulation). It wraps itself in `NavigationIndependentTree` + `NavigationContainer` so consumers do NOT wrap it.
 
-```typescript
-function ProvisioningNavigator({ onComplete, onDismiss, theme, config }: ProvisioningNavigatorProps) {
-  const step = useProvisioningStore((s) => s.step);
-  const navigation = useNavigation();
-
-  // Navigate when step changes
-  useEffect(() => {
-    const screenName = stepToScreenName(step);
-    if (screenName) {
-      navigation.navigate(screenName);
-    }
-  }, [step, navigation]);
-
-  return (
-    <Stack.Navigator screenOptions={buildScreenOptions(theme)}>
-      <Stack.Screen name="Welcome" component={WelcomeScreen} />
-      <Stack.Screen name="Connect" component={ConnectScreen} />
-      <Stack.Screen name="NetworkScan" component={NetworkScanScreen} />
-      <Stack.Screen name="Credentials" component={CredentialsScreen} />
-      <Stack.Screen name="Connecting" component={ConnectingScreen} />
-      <Stack.Screen name="Success" component={SuccessScreen} />
-      <Stack.Screen name="Manage" component={ManageScreen} />
-    </Stack.Navigator>
-  );
-}
-```
+The navigator also handles lifecycle: calls `store.initialize(config)` on mount and `store.destroy()` on unmount. Screens receive theme/callbacks via a React context (`NavigatorContext`).
 
 ### Device Discovery Difference: Web Bluetooth vs react-native-ble-plx
 
@@ -1379,7 +1312,7 @@ The `WelcomeScreen` calls `startScan()` and the `ConnectScreen` shows the discov
 // ── Types ──
 export type {
   // BLE
-  BleConnectionState, DiscoveredDevice, ConnectedDeviceInfo,
+  BleErrorCode, BleConnectionState, DiscoveredDevice, ConnectedDeviceInfo,
   BleTransportConfig, BleTransportEvents,
   // Protocol
   CommandName, AddNetworkParams, DelNetworkParams, ConnectParams,
@@ -1392,10 +1325,8 @@ export type {
   // Provisioning
   ProvisioningStep, ProvisioningResult, ProvisioningConfig, ProvisioningTheme,
   ProvisioningManagerEvents,
-  // Store
-  StoreState, StoreActions, ProvisioningStore,
-  BleSlice, ProtocolSlice, PollerSlice, ProvisioningSlice,
 } from './types';
+export { BleLibraryError } from './types/ble';
 
 // ── Constants ──
 export {
@@ -1404,10 +1335,15 @@ export {
 } from './constants';
 export { PROVISIONING_STEP_ORDER, stepNumber } from './types/provisioning';
 
+// ── Utilities ──
+export { setLogLevel } from './utils';
+export type { LogLevel } from './utils';
+
 // ── Service Classes (for headless / advanced use) ──
 export { BleTransport } from './services/BleTransport';
 export { DeviceProtocol } from './services/DeviceProtocol';
 export { ConnectionPoller } from './services/ConnectionPoller';
+export type { ConnectionPollerEvents } from './services/ConnectionPoller';
 export { ProvisioningManager } from './services/ProvisioningManager';
 
 // ── Service Factory (singleton access) ──
@@ -1418,6 +1354,7 @@ export {
 
 // ── Zustand Store ──
 export { useProvisioningStore } from './store';
+export type { ProvisioningStoreState, ProvisioningStoreActions } from './store';
 
 // ── React Hooks ──
 export { useProvisioning } from './hooks/useProvisioning';
@@ -1436,6 +1373,7 @@ export {
   NetworkList, NetworkListItem,
   SavedNetworkList, SavedNetworkItem,
   ApSettings, VariableEditor,
+  DeviceListItem,
 } from './components';
 
 // ── Pre-Built Screens ──
@@ -1444,8 +1382,11 @@ export {
   ConnectingScreen, SuccessScreen, ManageScreen,
 } from './screens';
 
-// ── Navigation ──
-export { ProvisioningNavigator } from './navigation';
+// ── Navigation Utilities ──
+// Note: ProvisioningNavigator is exported from 'esp-wifi-manager-react-native/navigation'
+// to avoid requiring @react-navigation peer deps for hooks-only users.
+export { SCREEN_NAMES, stepToScreenName } from './navigation/navigationConfig';
+export type { ScreenName } from './navigation/navigationConfig';
 ```
 
 ### Usage Examples
@@ -1453,16 +1394,16 @@ export { ProvisioningNavigator } from './navigation';
 **Minimal -- full pre-built UI:**
 
 ```typescript
-import { ProvisioningNavigator } from 'esp-wifi-manager-react-native';
+import { ProvisioningNavigator } from 'esp-wifi-manager-react-native/navigation';
 
 function App() {
+  // ProvisioningNavigator wraps itself in NavigationIndependentTree +
+  // NavigationContainer, so do NOT wrap it in your own NavigationContainer.
   return (
-    <NavigationContainer>
-      <ProvisioningNavigator
-        onComplete={(result) => console.log('Provisioned!', result)}
-        onDismiss={() => console.log('Dismissed')}
-      />
-    </NavigationContainer>
+    <ProvisioningNavigator
+      onComplete={(result) => console.log('Provisioned!', result)}
+      onDismiss={() => console.log('Dismissed')}
+    />
   );
 }
 ```

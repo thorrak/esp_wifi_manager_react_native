@@ -328,6 +328,56 @@ describe('provisioningStore — poller event subscriptions', () => {
   });
 });
 
+describe('provisioningStore — re-subscribe after destroyServices', () => {
+  it('regression: store re-wires when factory hands back a fresh manager', () => {
+    // Initial subscription wires against stubManager; verify it works.
+    managerEmitter.emit('stepChanged', 'scanBle' as ProvisioningStep);
+    expect(useProvisioningStore.getState().step).toBe('scanBle');
+
+    // Simulate destroyServices + initializeServices: the factory now
+    // returns NEW manager/poller/transport instances. The store must
+    // detect the identity change and rewire — otherwise step events from
+    // the new manager are silently dropped (the bug FT2 hit when scanning,
+    // cancelling, then scanning again).
+    const newManagerEmitter = new StubEmitter();
+    const newManager = {
+      on: (e: string, h: Listener) => newManagerEmitter.on(e, h),
+      start: jest.fn(),
+      chooseDevice: jest.fn(),
+      proceedFromConfigure: jest.fn(),
+      rescanWifi: jest.fn(),
+      chooseNetwork: jest.fn(),
+      backToNetworks: jest.fn(),
+      submitPassword: jest.fn(),
+      retryJoin: jest.fn(),
+      pickDifferentNetwork: jest.fn(),
+      pickDifferentDevice: jest.fn(),
+      cancel: jest.fn(),
+      goToManage: jest.fn(),
+    };
+    (factory.getManager as jest.Mock).mockImplementation(() => newManager);
+
+    // Reset store state to welcome (mimicking a clean re-entry).
+    useProvisioningStore.setState({ step: 'welcome' });
+    // Trigger ensureInitialized via any action; subscribeToServices runs
+    // internally and should detect the new manager identity.
+    useProvisioningStore.getState().initialize();
+
+    // Events on the OLD manager must NOT reach the store anymore.
+    managerEmitter.emit('stepChanged', 'connectingBle' as ProvisioningStep);
+    expect(useProvisioningStore.getState().step).toBe('welcome');
+
+    // Events on the NEW manager MUST reach the store.
+    newManagerEmitter.emit('stepChanged', 'scanBle' as ProvisioningStep);
+    expect(useProvisioningStore.getState().step).toBe('scanBle');
+
+    // Restore the original mock so subsequent tests work.
+    (factory.getManager as jest.Mock).mockImplementation(
+      () => stubManager as never,
+    );
+  });
+});
+
 describe('provisioningStore — action delegation', () => {
   it('chooseDevice forwards to the manager', async () => {
     const target: DiscoveredDevice = { id: 'd1', name: 'X', rssi: -50 };

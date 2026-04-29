@@ -150,6 +150,12 @@ const initialState: ProvisioningStoreState = {
 // ---------------------------------------------------------------------------
 
 let unsubscribers: Array<() => void> = [];
+// Identity of the manager we're currently subscribed to. We track this (not
+// just the unsubscribers array length) so that if `destroyServices()` is
+// called externally and a fresh manager is created on the next
+// `initializeServices()`, we detect the change and re-wire — instead of
+// leaking subscriptions to the dead emitter and silently dropping events.
+let subscribedManager: object | null = null;
 
 type SetState = (
   partial:
@@ -158,15 +164,22 @@ type SetState = (
 ) => void;
 
 /**
- * Subscribe to all service events and sync state. Idempotent — no-ops if
- * subscriptions already exist.
+ * Subscribe to all service events and sync state. Detects when the
+ * underlying services have been replaced (via destroyServices() +
+ * initializeServices()) and re-wires against the new manager.
  */
 function subscribeToServices(set: SetState): void {
-  if (unsubscribers.length > 0) return;
+  const manager = getManager();
+  if (subscribedManager === manager) return;
+
+  // Different manager (or first time) — tear down any stale subscriptions
+  // before re-wiring.
+  for (const unsub of unsubscribers) unsub();
+  unsubscribers = [];
+  subscribedManager = manager;
 
   const transport = getTransport();
   const poller = getPoller();
-  const manager = getManager();
 
   // -- Transport ------------------------------------------------------------
 
@@ -309,6 +322,7 @@ export const useProvisioningStore = create<
   destroy: () => {
     for (const unsub of unsubscribers) unsub();
     unsubscribers = [];
+    subscribedManager = null;
     void destroyServices();
     set(initialState);
   },

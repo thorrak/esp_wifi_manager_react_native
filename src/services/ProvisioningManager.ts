@@ -1,26 +1,33 @@
 /**
- * ProvisioningManager — Layer 4 of the ESP WiFi Manager library.
+ * ProvisioningManager — Layer 4 of the ESP WiFi Config library.
  *
- * Orchestrates BleTransport, DeviceProtocol, and ConnectionPoller to implement
- * the full WiFi provisioning wizard as a plain TypeScript class. It does NOT
- * call any navigation APIs — it emits `stepChanged` events so the UI layer
- * can drive navigation independently.
+ * Owns the wizard step machine and coordinates BleTransport, DeviceProtocol,
+ * and ConnectionPoller. Emits typed events so consumers (the Zustand store,
+ * tests, headless callers) can react without coupling to lower layers.
+ *
+ * The manager never touches navigation APIs directly — `stepChanged` events
+ * drive any UI navigation independently.
  */
 
 import type {
-  ProvisioningStep,
+  BleConnectionState,
+  ConnectedDeviceInfo,
+  DeviceConnection,
+  DiscoveredDevice,
+  OnConnectedCallback,
   ProvisioningConfig,
-  ProvisioningResult,
+  ProvisioningError,
   ProvisioningManagerEvents,
+  ProvisioningResult,
+  ProvisioningStep,
   ScannedNetwork,
   WifiStatus,
-  BleConnectionState,
 } from '../types';
 
 import {
+  DEFAULT_NETWORK_PRIORITY,
   DEFAULT_POLL_INTERVAL_MS,
   DEFAULT_POLL_TIMEOUT_MS,
-  DEFAULT_NETWORK_PRIORITY,
   DISCONNECT_SETTLE_MS,
 } from '../constants/provisioning';
 
@@ -28,8 +35,8 @@ import { TypedEventEmitter, createLogger } from '../utils';
 
 import { BleLibraryError } from '../types/ble';
 import type { BleTransport } from './BleTransport';
-import type { DeviceProtocol } from './DeviceProtocol';
 import type { ConnectionPoller } from './ConnectionPoller';
+import type { DeviceProtocol } from './DeviceProtocol';
 
 const log = createLogger('ProvisioningManager');
 
@@ -37,27 +44,57 @@ const log = createLogger('ProvisioningManager');
 // Resolved config with defaults applied
 // ---------------------------------------------------------------------------
 
-interface ResolvedProvisioningConfig {
-  pollIntervalMs: number;
-  pollTimeoutMs: number;
+interface ResolvedFlowConfig {
+  onConnected: OnConnectedCallback | null;
   defaultNetworkPriority: number;
+  autoConnectOpenNetworks: boolean;
+}
+
+interface ResolvedPollerConfig {
+  intervalMs: number;
+  timeoutMs: number;
+}
+
+interface ResolvedProvisioningConfig {
+  flow: ResolvedFlowConfig;
+  poller: ResolvedPollerConfig;
 }
 
 function resolveConfig(config?: ProvisioningConfig): ResolvedProvisioningConfig {
   return {
-    pollIntervalMs: config?.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS,
-    pollTimeoutMs: config?.pollTimeoutMs ?? DEFAULT_POLL_TIMEOUT_MS,
-    defaultNetworkPriority: config?.defaultNetworkPriority ?? DEFAULT_NETWORK_PRIORITY,
+    flow: {
+      onConnected: config?.flow?.onConnected ?? null,
+      defaultNetworkPriority:
+        config?.flow?.defaultNetworkPriority ?? DEFAULT_NETWORK_PRIORITY,
+      autoConnectOpenNetworks: config?.flow?.autoConnectOpenNetworks ?? true,
+    },
+    poller: {
+      intervalMs: config?.poller?.intervalMs ?? DEFAULT_POLL_INTERVAL_MS,
+      timeoutMs: config?.poller?.timeoutMs ?? DEFAULT_POLL_TIMEOUT_MS,
+    },
   };
 }
 
 // ---------------------------------------------------------------------------
-// Utility
+// Helpers
 // ---------------------------------------------------------------------------
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
+
+function toErrorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+/** Steps where an unexpected BLE disconnect should NOT raise an error. */
+const DISCONNECT_SAFE_STEPS: ReadonlySet<ProvisioningStep> = new Set<ProvisioningStep>([
+  'welcome',
+  'scanBle',
+  'connectingBle', // chooseDevice handles its own failure path
+  'success',
+  'manage',
+]);
 
 // ---------------------------------------------------------------------------
 // ProvisioningManager
@@ -74,14 +111,11 @@ export class ProvisioningManager extends TypedEventEmitter<ProvisioningManagerEv
   private _step: ProvisioningStep = 'welcome';
   private _selectedNetwork: ScannedNetwork | null = null;
   private _scannedNetworks: ScannedNetwork[] = [];
+  private _device: DeviceConnection = null;
+  private _error: ProvisioningError | null = null;
 
-  // -- Event unsubscribe handles --------------------------------------------
-  private unsubscribeTransport: (() => void) | null = null;
-  private unsubscribeTransportError: (() => void) | null = null;
-  private unsubscribePollerSucceeded: (() => void) | null = null;
-  private unsubscribePollerFailed: (() => void) | null = null;
-  private unsubscribePollerTimedOut: (() => void) | null = null;
-  private unsubscribePollerWifiState: (() => void) | null = null;
+  // -- Event unsubscribe handles -------------------------------------------
+  private unsubscribeFns: Array<() => void> = [];
 
   // -----------------------------------------------------------------------
   // Constructor
@@ -108,269 +142,336 @@ export class ProvisioningManager extends TypedEventEmitter<ProvisioningManagerEv
   // Public getters
   // -----------------------------------------------------------------------
 
+  /** Current step in the wizard state machine. */
   get currentStep(): ProvisioningStep {
     return this._step;
   }
 
+  /** Currently selected network (after `chooseNetwork`), or `null`. */
   get selectedNetwork(): ScannedNetwork | null {
     return this._selectedNetwork;
   }
 
+  /** Most recent WiFi scan results, RSSI-sorted. */
   get scannedNetworks(): ScannedNetwork[] {
     return this._scannedNetworks;
   }
 
-  // -----------------------------------------------------------------------
-  // Step 1 — scanForDevices
-  // -----------------------------------------------------------------------
+  /** Current device-connection state. */
+  get device(): DeviceConnection {
+    return this._device;
+  }
 
-  async scanForDevices(): Promise<void> {
-    log.info('scanForDevices');
-    this.clearError();
-
-    try {
-      // If currently connected, disconnect first and let BLE settle.
-      if (this.transport.isConnected) {
-        log.debug('Disconnecting before scan');
-        await this.transport.disconnect();
-        await delay(DISCONNECT_SETTLE_MS);
-      }
-
-      await this.transport.startScan();
-      this.setStep('connect');
-    } catch (err: unknown) {
-      const error = err instanceof Error ? err : new Error(String(err));
-      log.error('scanForDevices failed:', error.message);
-      this.setError(error.message);
-    }
+  /** Current error envelope, or `null` if no error is active. */
+  get error(): ProvisioningError | null {
+    return this._error;
   }
 
   // -----------------------------------------------------------------------
-  // Step 2 — connectToDevice
+  // Public actions — verb-named, mapped 1:1 to user intent
   // -----------------------------------------------------------------------
 
-  async connectToDevice(deviceId: string): Promise<void> {
-    log.info('connectToDevice:', deviceId);
+  /**
+   * Begin the wizard: clear state, transition to `scanBle`, start a BLE scan.
+   * Safe to call from any step; will disconnect first if needed.
+   */
+  async start(): Promise<void> {
+    log.info('start');
+    await this.goToScanning();
+  }
+
+  /**
+   * Choose a discovered BLE device and begin the connection sequence.
+   * Drives the manager through `connectingBle` → `configuring` → (auto-skip
+   * if no `onConnected`) → `scanningWifi` → `chooseNetwork`.
+   */
+  async chooseDevice(target: DiscoveredDevice): Promise<void> {
+    log.info('chooseDevice:', target.name, target.id);
     this.clearError();
 
+    // Update device state immediately so UI can show the spinner overlay
+    // even while the BLE handshake runs.
+    this._device = {
+      status: 'connecting',
+      id: target.id,
+      name: target.name,
+      rssi: target.rssi,
+    };
+    this.emit('deviceConnectionChanged', this._device);
+    this.setStep('connectingBle');
+
+    // Stop any running scan. Let the BLE stack settle before connecting —
+    // Android's connectToDevice() can fail with "Operation was cancelled"
+    // if the native scan teardown hasn't completed.
+    this.transport.stopScan();
+    await delay(DISCONNECT_SETTLE_MS);
+
+    let info: ConnectedDeviceInfo;
     try {
-      this.transport.stopScan();
-      this.setStep('connect');
-
-      // Let the BLE stack settle after stopping the scan — on Android,
-      // connectToDevice() can fail with "Operation was cancelled" if the
-      // native scan teardown hasn't fully completed.
-      await delay(DISCONNECT_SETTLE_MS);
-
-      await this.transport.connect(deviceId);
-    } catch (err: unknown) {
-      const error = err instanceof Error ? err : new Error(String(err));
-      log.error('connectToDevice failed:', error.message);
-      this.setError(error.message);
-      this.setStep('welcome');
+      info = await this.transport.connect(target.id);
+    } catch (err) {
+      const code = err instanceof BleLibraryError ? err.code : undefined;
+      this._device = null;
+      this.emit('deviceConnectionChanged', null);
+      this.setError({
+        source: 'ble',
+        code,
+        message: toErrorMessage(err),
+        recoverable: true,
+      });
+      this.setStep('scanBle');
       return;
     }
 
-    // Connection succeeded — show the networks screen (with loading spinner)
-    // before starting the WiFi scan so the user gets immediate feedback.
-    this.setStep('networks');
+    this._device = {
+      status: 'connected',
+      id: info.id,
+      name: info.name,
+      mtu: info.mtu,
+    };
+    this.emit('deviceConnectionChanged', this._device);
 
-    try {
-      await this.scanWifiNetworks();
-    } catch (err: unknown) {
-      // scanWifiNetworks handles its own error emission, but we catch here
-      // to prevent unhandled promise rejection. Stay on 'networks' step.
-      const error = err instanceof Error ? err : new Error(String(err));
-      log.error('Post-connect WiFi scan failed:', error.message);
+    // Always enter `configuring` — runs `onConnected` if provided, or
+    // auto-advances synchronously if not. Two distinct paths so the
+    // step machine stays uniform.
+    this.setStep('configuring');
+
+    if (this.config.flow.onConnected) {
+      try {
+        await this.config.flow.onConnected({
+          protocol: this.protocol,
+          transport: this.transport,
+        });
+      } catch (err) {
+        this.setError({
+          source: 'flow',
+          message: toErrorMessage(err),
+          recoverable: true,
+        });
+        // Stay parked on `configuring` so consumer UI can show the error
+        // and let the user retry from there.
+        return;
+      }
     }
+
+    await this.proceedFromConfigure();
   }
 
-  // -----------------------------------------------------------------------
-  // WiFi network scanning
-  // -----------------------------------------------------------------------
-
-  async scanWifiNetworks(): Promise<void> {
-    log.info('scanWifiNetworks');
+  /**
+   * Continue past the `configuring` step. Called automatically when no
+   * `onConnected` callback is configured; consumer UIs that own the
+   * `configuring` screen call it manually after their custom setup.
+   */
+  async proceedFromConfigure(): Promise<void> {
+    if (this._step !== 'configuring') {
+      log.warn('proceedFromConfigure called outside configuring step:', this._step);
+      return;
+    }
     this.clearError();
-
-    try {
-      const result = await this.protocol.scan();
-      const networks = [...(result.networks ?? [])].sort(
-        (a, b) => b.rssi - a.rssi,
-      );
-
-      this._scannedNetworks = networks;
-      this.emit('scannedNetworksUpdated', networks);
-      this.setStep('networks');
-
-      log.info(`Found ${networks.length} WiFi networks`);
-    } catch (err: unknown) {
-      const error = err instanceof Error ? err : new Error(String(err));
-      log.error('scanWifiNetworks failed:', error.message);
-      this.setError(error.message);
-      // Stay on 'networks' step so user can retry.
-      this.setStep('networks');
-      throw error;
-    }
+    this.setStep('scanningWifi');
+    await this.runWifiScan();
   }
 
-  // -----------------------------------------------------------------------
-  // Step 3 — selectNetwork
-  // -----------------------------------------------------------------------
+  /**
+   * Re-run the WiFi scan from the network-list screen. Transitions
+   * `chooseNetwork` → `scanningWifi` → `chooseNetwork`.
+   */
+  async rescanWifi(): Promise<void> {
+    if (this._step !== 'chooseNetwork' && this._step !== 'scanningWifi') {
+      log.warn('rescanWifi called from unsupported step:', this._step);
+      return;
+    }
+    this.clearError();
+    this.setStep('scanningWifi');
+    await this.runWifiScan();
+  }
 
-  selectNetwork(network: ScannedNetwork): void {
-    log.info('selectNetwork:', network.ssid);
+  /**
+   * Pick a WiFi network from the scanned list. Transitions to
+   * `enterCredentials`.
+   */
+  chooseNetwork(network: ScannedNetwork): void {
+    log.info('chooseNetwork:', network.ssid);
     this._selectedNetwork = network;
     this.emit('selectedNetworkChanged', network);
-    this.setStep('credentials');
+    this.setStep('enterCredentials');
   }
 
-  // -----------------------------------------------------------------------
-  // Step 4 — submitCredentials
-  // -----------------------------------------------------------------------
+  /**
+   * Return from `enterCredentials` to the network list without sending
+   * credentials.
+   */
+  backToNetworks(): void {
+    log.info('backToNetworks');
+    this._selectedNetwork = null;
+    this.emit('selectedNetworkChanged', null);
+    this.setStep('chooseNetwork');
+  }
 
-  async submitCredentials(password: string): Promise<void> {
-    log.info('submitCredentials for:', this._selectedNetwork?.ssid);
+  /**
+   * Submit a WiFi password. Transitions immediately to `joiningWifi` so
+   * the UI can render the joining screen, then sends `add_network` and
+   * `connect` and starts the connection poller.
+   */
+  async submitPassword(password: string): Promise<void> {
+    log.info('submitPassword for:', this._selectedNetwork?.ssid);
     this.clearError();
 
     if (!this._selectedNetwork) {
-      this.setError('No network selected');
+      this.setError({
+        source: 'flow',
+        code: 'no_network',
+        message: 'No network selected',
+        recoverable: false,
+      });
       return;
     }
+
+    const ssid = this._selectedNetwork.ssid;
+
+    // Transition immediately for UI feedback. Reset the poller so any prior
+    // run's terminal flag (connectionFailed) is cleared.
+    this.poller.reset();
+    this.setStep('joiningWifi');
 
     try {
       await this.protocol.addNetwork({
-        ssid: this._selectedNetwork.ssid,
+        ssid,
         password,
-        priority: this.config.defaultNetworkPriority,
+        priority: this.config.flow.defaultNetworkPriority,
       });
-
-      await this.protocol.connectWifi(this._selectedNetwork.ssid);
-
-      this.setStep('connecting');
-      this.poller.startPolling(this.config.pollTimeoutMs, this.config.pollIntervalMs);
-    } catch (err: unknown) {
-      const error = err instanceof Error ? err : new Error(String(err));
-      log.error('submitCredentials failed:', error.message);
-      this.setError(error.message);
-    }
-  }
-
-  // -----------------------------------------------------------------------
-  // Retry from 'connecting' step
-  // -----------------------------------------------------------------------
-
-  async retryConnection(): Promise<void> {
-    log.info('retryConnection for:', this._selectedNetwork?.ssid);
-    this.clearError();
-
-    if (!this._selectedNetwork) {
-      this.setError('No network selected');
+      await this.protocol.connectWifi(ssid);
+    } catch (err) {
+      this.setError({
+        source: 'protocol',
+        message: toErrorMessage(err),
+        recoverable: true,
+      });
+      // Stay on joiningWifi — the failure is visible there and the user can retry.
       return;
     }
 
-    try {
-      this.poller.reset();
-      await this.protocol.connectWifi(this._selectedNetwork.ssid);
-      this.poller.startPolling(this.config.pollTimeoutMs, this.config.pollIntervalMs);
-    } catch (err: unknown) {
-      const error = err instanceof Error ? err : new Error(String(err));
-      log.error('retryConnection failed:', error.message);
-      this.setError(error.message);
-    }
+    this.poller.startPolling(
+      this.config.poller.timeoutMs,
+      this.config.poller.intervalMs,
+    );
   }
 
-  // -----------------------------------------------------------------------
-  // Delete network and go back to scan results
-  // -----------------------------------------------------------------------
+  /**
+   * Re-issue the connect command for the currently selected network and
+   * restart polling. Use after a `connectionFailed` or `connectionTimedOut`.
+   */
+  async retryJoin(): Promise<void> {
+    log.info('retryJoin for:', this._selectedNetwork?.ssid);
+    this.clearError();
 
-  async deleteNetworkAndReturn(): Promise<void> {
-    log.info('deleteNetworkAndReturn');
+    if (!this._selectedNetwork) {
+      this.setError({
+        source: 'flow',
+        code: 'no_network',
+        message: 'No network selected',
+        recoverable: false,
+      });
+      return;
+    }
 
     this.poller.reset();
-
     try {
-      if (this._selectedNetwork) {
+      await this.protocol.connectWifi(this._selectedNetwork.ssid);
+    } catch (err) {
+      this.setError({
+        source: 'protocol',
+        message: toErrorMessage(err),
+        recoverable: true,
+      });
+      return;
+    }
+    this.poller.startPolling(
+      this.config.poller.timeoutMs,
+      this.config.poller.intervalMs,
+    );
+  }
+
+  /**
+   * Delete the currently selected (failed) network and return to the
+   * network list. `del_network` failures are logged but non-fatal.
+   */
+  async pickDifferentNetwork(): Promise<void> {
+    log.info('pickDifferentNetwork');
+    this.poller.reset();
+
+    if (this._selectedNetwork) {
+      try {
         await this.protocol.delNetwork(this._selectedNetwork.ssid);
+      } catch (err) {
+        log.warn('delNetwork failed (continuing):', toErrorMessage(err));
       }
-    } catch (err: unknown) {
-      const error = err instanceof Error ? err : new Error(String(err));
-      log.warn('delNetwork failed (continuing anyway):', error.message);
-      // Non-fatal — continue to scan.
     }
 
     this._selectedNetwork = null;
     this.emit('selectedNetworkChanged', null);
 
-    try {
-      await this.scanWifiNetworks();
-    } catch (err: unknown) {
-      // scanWifiNetworks handles its own errors.
-      const error = err instanceof Error ? err : new Error(String(err));
-      log.error('Post-delete WiFi scan failed:', error.message);
-    }
+    this.setStep('scanningWifi');
+    await this.runWifiScan();
   }
 
-  // -----------------------------------------------------------------------
-  // Navigate back to network selection
-  // -----------------------------------------------------------------------
-
-  goToNetworks(): void {
-    log.info('goToNetworks');
-    this._selectedNetwork = null;
-    this.emit('selectedNetworkChanged', null);
-    this.setStep('networks');
+  /**
+   * Disconnect from the current device and return to BLE scanning.
+   */
+  async pickDifferentDevice(): Promise<void> {
+    log.info('pickDifferentDevice');
+    await this.goToScanning();
   }
 
-  // -----------------------------------------------------------------------
-  // Navigate to manage screen
-  // -----------------------------------------------------------------------
+  /**
+   * User-initiated cancel. Disconnects, clears all state, returns to
+   * `welcome`. Equivalent to closing the wizard.
+   */
+  async cancel(): Promise<void> {
+    log.info('cancel');
 
-  goToManage(): void {
-    log.info('goToManage');
-    this.setStep('manage');
-  }
-
-  // -----------------------------------------------------------------------
-  // Full reset
-  // -----------------------------------------------------------------------
-
-  async reset(): Promise<void> {
-    log.info('reset');
-
-    // Set step to 'welcome' BEFORE disconnecting so the transport's
-    // connectionStateChanged listener won't trigger a spurious
-    // "Bluetooth connection lost" error and re-entrant reset().
+    // Set step to 'welcome' BEFORE disconnecting so the disconnect listener
+    // sees a safe step and doesn't raise a spurious "connection lost" error.
     this._step = 'welcome';
     this._selectedNetwork = null;
     this._scannedNetworks = [];
+    this._device = null;
+    this._error = null;
 
     this.poller.reset();
 
     try {
       await this.transport.disconnect();
-    } catch (err: unknown) {
-      const error = err instanceof Error ? err : new Error(String(err));
-      log.warn('Disconnect during reset failed (ignoring):', error.message);
+    } catch (err) {
+      log.warn('Disconnect during cancel failed (ignoring):', toErrorMessage(err));
     }
 
     this.emit('provisioningReset');
     this.emit('stepChanged', 'welcome');
     this.emit('selectedNetworkChanged', null);
     this.emit('scannedNetworksUpdated', []);
+    this.emit('deviceConnectionChanged', null);
+    this.emit('errorChanged', null);
+  }
+
+  /**
+   * Transition from `success` to `manage` for post-provisioning device tools.
+   */
+  goToManage(): void {
+    log.info('goToManage');
+    this.setStep('manage');
   }
 
   // -----------------------------------------------------------------------
-  // Destroy — full cleanup and event unsubscription
+  // Lifecycle
   // -----------------------------------------------------------------------
 
+  /** Tear down all event subscriptions and clear state. */
   async destroy(): Promise<void> {
     log.info('destroy');
-
-    await this.reset();
+    await this.cancel();
     this.unsubscribeFromServices();
     this.removeAllListeners();
-
     log.info('ProvisioningManager destroyed');
   }
 
@@ -378,23 +479,76 @@ export class ProvisioningManager extends TypedEventEmitter<ProvisioningManagerEv
   // Private helpers
   // -----------------------------------------------------------------------
 
-  private setStep(step: ProvisioningStep): void {
-    if (this._step === step) {
-      return;
+  private async goToScanning(): Promise<void> {
+    this.clearError();
+    this.poller.reset();
+    this._selectedNetwork = null;
+    this._scannedNetworks = [];
+    this._device = null;
+    this.emit('selectedNetworkChanged', null);
+    this.emit('scannedNetworksUpdated', []);
+    this.emit('deviceConnectionChanged', null);
+
+    if (this.transport.isConnected) {
+      try {
+        await this.transport.disconnect();
+        await delay(DISCONNECT_SETTLE_MS);
+      } catch (err) {
+        log.warn('Disconnect before scan failed (continuing):', toErrorMessage(err));
+      }
     }
+
+    this.setStep('scanBle');
+    try {
+      await this.transport.startScan();
+    } catch (err) {
+      this.setError({
+        source: 'ble',
+        message: toErrorMessage(err),
+        recoverable: true,
+      });
+    }
+  }
+
+  private async runWifiScan(): Promise<void> {
+    try {
+      const result = await this.protocol.scan();
+      const networks = [...(result.networks ?? [])].sort(
+        (a, b) => b.rssi - a.rssi,
+      );
+      this._scannedNetworks = networks;
+      this.emit('scannedNetworksUpdated', networks);
+      this.setStep('chooseNetwork');
+      log.info(`Found ${networks.length} WiFi networks`);
+    } catch (err) {
+      this.setError({
+        source: 'protocol',
+        message: toErrorMessage(err),
+        recoverable: true,
+      });
+      // Land on chooseNetwork so the user can retry via rescanWifi().
+      this.setStep('chooseNetwork');
+    }
+  }
+
+  private setStep(step: ProvisioningStep): void {
+    if (this._step === step) return;
     const previous = this._step;
     this._step = step;
     log.info(`Step: ${previous} -> ${step}`);
     this.emit('stepChanged', step);
   }
 
-  private setError(message: string): void {
-    log.error('Error:', message);
-    this.emit('provisioningError', message);
+  private setError(error: ProvisioningError): void {
+    log.warn('Error:', error.source, error.message);
+    this._error = error;
+    this.emit('errorChanged', error);
   }
 
   private clearError(): void {
-    this.emit('provisioningError', null);
+    if (this._error === null) return;
+    this._error = null;
+    this.emit('errorChanged', null);
   }
 
   // -----------------------------------------------------------------------
@@ -402,40 +556,48 @@ export class ProvisioningManager extends TypedEventEmitter<ProvisioningManagerEv
   // -----------------------------------------------------------------------
 
   private subscribeToServices(): void {
-    // Transport: watch for unexpected BLE disconnection mid-flow.
-    this.unsubscribeTransport = this.transport.on(
-      'connectionStateChanged',
-      (state: BleConnectionState) => {
-        if (state === 'disconnected' && this._step !== 'welcome' && this._step !== 'connect') {
-          log.warn('Bluetooth connection lost during provisioning (step:', this._step, ')');
-          this.setError('Bluetooth connection lost');
-          void this.reset();
+    // Transport: react to unexpected disconnects mid-flow.
+    this.unsubscribeFns.push(
+      this.transport.on('connectionStateChanged', (state: BleConnectionState) => {
+        if (state === 'disconnected' && !DISCONNECT_SAFE_STEPS.has(this._step)) {
+          log.warn('Bluetooth connection lost during step:', this._step);
+          this._device = null;
+          this.emit('deviceConnectionChanged', null);
+          this.setError({
+            source: 'ble',
+            code: 'connection_lost',
+            message: 'Bluetooth connection lost',
+            recoverable: false,
+          });
+          void this.cancel();
         }
-      },
+      }),
     );
 
-    // Transport: watch for BLE errors that should abort scanning and
-    // return to the welcome screen (e.g. permission denied, adapter off).
-    this.unsubscribeTransportError = this.transport.on(
-      'error',
-      (err: Error) => {
+    // Transport: surface BLE-level errors (adapter off, unauthorized) when
+    // the user is in the early scanning stage. These typically cancel the
+    // current scan.
+    this.unsubscribeFns.push(
+      this.transport.on('error', (err: Error) => {
         if (
           err instanceof BleLibraryError &&
-          (this._step === 'connect' || this._step === 'welcome')
+          (this._step === 'scanBle' || this._step === 'welcome')
         ) {
-          log.warn('BLE error during scan (returning to welcome):', err.code, err.message);
-          this.setStep('welcome');
+          this.setError({
+            source: 'ble',
+            code: err.code,
+            message: err.message,
+            recoverable: false,
+          });
         }
-      },
+      }),
     );
 
     // Poller: WiFi connection succeeded.
-    this.unsubscribePollerSucceeded = this.poller.on(
-      'connectionSucceeded',
-      (status: WifiStatus) => {
+    this.unsubscribeFns.push(
+      this.poller.on('connectionSucceeded', (status: WifiStatus) => {
         log.info('Connection succeeded:', status.ssid, status.ip);
         this.setStep('success');
-
         const result: ProvisioningResult = {
           success: true,
           ssid: status.ssid,
@@ -444,49 +606,43 @@ export class ProvisioningManager extends TypedEventEmitter<ProvisioningManagerEv
           deviceId: this.transport.connectedDevice?.id,
         };
         this.emit('provisioningComplete', result);
-      },
+      }),
     );
 
     // Poller: WiFi connection failed (saw connecting -> disconnected).
-    this.unsubscribePollerFailed = this.poller.on('connectionFailed', () => {
-      log.warn('WiFi connection failed');
-      // Stay on 'connecting' step so user can retry.
-      this.setError('WiFi connection failed. You can retry or go back.');
-    });
+    this.unsubscribeFns.push(
+      this.poller.on('connectionFailed', () => {
+        this.setError({
+          source: 'poller',
+          code: 'connection_failed',
+          message: 'WiFi connection failed. You can retry or pick a different network.',
+          recoverable: true,
+        });
+      }),
+    );
 
     // Poller: WiFi connection timed out.
-    this.unsubscribePollerTimedOut = this.poller.on('connectionTimedOut', () => {
-      log.warn('WiFi connection timed out');
-      // Stay on 'connecting' step so user can retry.
-      this.setError('WiFi connection timed out. You can retry or go back.');
-    });
+    this.unsubscribeFns.push(
+      this.poller.on('connectionTimedOut', () => {
+        this.setError({
+          source: 'poller',
+          code: 'connection_timeout',
+          message: 'WiFi connection timed out. You can retry or pick a different network.',
+          recoverable: true,
+        });
+      }),
+    );
 
-    // Poller: forward WiFi state changes.
-    this.unsubscribePollerWifiState = this.poller.on(
-      'wifiStateChanged',
-      (status: WifiStatus) => {
+    // Poller: forward WiFi state changes for UI rendering.
+    this.unsubscribeFns.push(
+      this.poller.on('wifiStateChanged', (status: WifiStatus) => {
         this.emit('wifiStatusUpdated', status);
-      },
+      }),
     );
   }
 
   private unsubscribeFromServices(): void {
-    this.unsubscribeTransport?.();
-    this.unsubscribeTransport = null;
-
-    this.unsubscribeTransportError?.();
-    this.unsubscribeTransportError = null;
-
-    this.unsubscribePollerSucceeded?.();
-    this.unsubscribePollerSucceeded = null;
-
-    this.unsubscribePollerFailed?.();
-    this.unsubscribePollerFailed = null;
-
-    this.unsubscribePollerTimedOut?.();
-    this.unsubscribePollerTimedOut = null;
-
-    this.unsubscribePollerWifiState?.();
-    this.unsubscribePollerWifiState = null;
+    for (const unsub of this.unsubscribeFns) unsub();
+    this.unsubscribeFns = [];
   }
 }

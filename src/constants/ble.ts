@@ -1,4 +1,4 @@
-/** Full 128-bit UUID for the WiFi Manager BLE service */
+/** Full 128-bit UUID for the WiFi Config BLE service */
 export const SERVICE_UUID = '0000FFE0-0000-1000-8000-00805F9B34FB';
 
 /** Status characteristic - Read, Notify */

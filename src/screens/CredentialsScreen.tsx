@@ -38,22 +38,23 @@ export function CredentialsScreen({ theme, onGoBack }: CredentialsScreenProps) {
 
   const {
     selectedNetwork,
-    submitCredentials,
-    provisioningError,
-    busy,
+    submitPassword,
+    error,
   } = useProvisioning();
 
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
 
   const isOpen = selectedNetwork?.auth === 'OPEN';
   const ssid = selectedNetwork?.ssid ?? '';
 
-  const handleConnect = () => {
-    if (isOpen) {
-      submitCredentials('');
-    } else {
-      submitCredentials(password);
+  const handleConnect = async () => {
+    setSubmitting(true);
+    try {
+      await submitPassword(isOpen ? '' : password);
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -72,7 +73,7 @@ export function CredentialsScreen({ theme, onGoBack }: CredentialsScreenProps) {
         contentContainerStyle={styles.scrollContent}
         keyboardShouldPersistTaps="handled"
       >
-        <ErrorBanner message={provisioningError} theme={theme} />
+        <ErrorBanner message={error?.message ?? null} theme={theme} />
 
         <View
           style={[
@@ -135,9 +136,9 @@ export function CredentialsScreen({ theme, onGoBack }: CredentialsScreenProps) {
                 placeholderTextColor={c.textSecondary}
                 autoCapitalize="none"
                 autoCorrect={false}
-                editable={!busy}
+                editable={!submitting}
                 returnKeyType="done"
-                onSubmitEditing={handleConnect}
+                onSubmitEditing={() => void handleConnect()}
               />
               <TouchableOpacity
                 style={styles.toggleButton}
@@ -158,23 +159,23 @@ export function CredentialsScreen({ theme, onGoBack }: CredentialsScreenProps) {
           style={[
             styles.connectButton,
             {
-              backgroundColor: busy ? c.border : c.primary,
+              backgroundColor: submitting ? c.border : c.primary,
               borderRadius,
             },
           ]}
-          onPress={handleConnect}
-          disabled={busy || (!isOpen && password.length === 0)}
+          onPress={() => void handleConnect()}
+          disabled={submitting || (!isOpen && password.length === 0)}
           activeOpacity={0.8}
         >
           <Text style={[styles.connectButtonText, { color: c.primaryText }]}>
-            {busy ? 'Connecting...' : 'Connect'}
+            {submitting ? 'Connecting...' : 'Connect'}
           </Text>
         </TouchableOpacity>
 
         <TouchableOpacity
           style={[styles.backButton, { borderRadius }]}
           onPress={handleBack}
-          disabled={busy}
+          disabled={submitting}
           activeOpacity={0.8}
         >
           <Text style={[styles.backButtonText, { color: c.textSecondary }]}>

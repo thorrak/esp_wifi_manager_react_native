@@ -1,7 +1,20 @@
+/**
+ * Convenience hook for the device's saved-network list (those persisted in
+ * the device's flash). Auto-fetches on mount.
+ *
+ * Use on the `manage` screen. Inside the wizard, the manager handles
+ * `add_network` / `del_network` directly.
+ */
+
 import { useState, useEffect, useCallback } from 'react';
 import type { SavedNetwork } from '../types';
 import { useDeviceProtocol } from './useDeviceProtocol';
 
+/**
+ * @example
+ * const { networks, fetchNetworks, deleteNetwork, loading, error } =
+ *   useSavedNetworks();
+ */
 export function useSavedNetworks() {
   const { listNetworks, delNetwork } = useDeviceProtocol();
 

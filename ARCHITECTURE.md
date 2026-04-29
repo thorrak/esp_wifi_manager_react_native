@@ -1,6 +1,8 @@
-# esp-wifi-manager-react-native -- Architecture
+# esp-wifi-config-react-native -- Architecture
 
-React Native library for BLE-based WiFi provisioning of ESP32 devices running `esp_wifi_manager`. Provides both headless hooks and pre-built UI components.
+React Native library for BLE-based WiFi provisioning of ESP32 devices running `esp_wifi_config`. Provides both headless hooks and pre-built UI components.
+
+> **v1.0.0 update:** The library was restructured around a granular 10-step machine, a unified `ProvisioningError` envelope, and verb-named action methods. Sections describing the previous step enum (`'connect' | 'networks' | 'credentials' | 'connecting'`), the `provisioningError`/`bleError`/`pollError` field set, and method names like `scanForDevices`/`connectToDevice`/`submitCredentials`/`reset` are stale and being rewritten. For the current contract, see [CLAUDE.md](./CLAUDE.md), [API.md](./API.md), [CHANGELOG.md](./CHANGELOG.md), and the source comments in `src/services/ProvisioningManager.ts` + `src/types/provisioning.ts`. The four-layer architecture (BleTransport → DeviceProtocol → ConnectionPoller → ProvisioningManager → Zustand → hooks → screens) is unchanged.
 
 ---
 
@@ -1383,7 +1385,7 @@ export {
 } from './screens';
 
 // ── Navigation Utilities ──
-// Note: ProvisioningNavigator is exported from 'esp-wifi-manager-react-native/navigation'
+// Note: ProvisioningNavigator is exported from 'esp-wifi-config-react-native/navigation'
 // to avoid requiring @react-navigation peer deps for hooks-only users.
 export { SCREEN_NAMES, stepToScreenName } from './navigation/navigationConfig';
 export type { ScreenName } from './navigation/navigationConfig';
@@ -1394,7 +1396,7 @@ export type { ScreenName } from './navigation/navigationConfig';
 **Minimal -- full pre-built UI:**
 
 ```typescript
-import { ProvisioningNavigator } from 'esp-wifi-manager-react-native/navigation';
+import { ProvisioningNavigator } from 'esp-wifi-config-react-native/navigation';
 
 function App() {
   // ProvisioningNavigator wraps itself in NavigationIndependentTree +
@@ -1411,7 +1413,7 @@ function App() {
 **Hooks only -- custom UI:**
 
 ```typescript
-import { useProvisioning, useWifiStatus } from 'esp-wifi-manager-react-native';
+import { useProvisioning, useWifiStatus } from 'esp-wifi-config-react-native';
 
 function MyProvisioningScreen() {
   const { step, scannedNetworks, scanForDevices, selectNetwork, submitCredentials } = useProvisioning();
@@ -1424,7 +1426,7 @@ function MyProvisioningScreen() {
 **Headless -- no React at all:**
 
 ```typescript
-import { BleTransport, DeviceProtocol, ConnectionPoller } from 'esp-wifi-manager-react-native';
+import { BleTransport, DeviceProtocol, ConnectionPoller } from 'esp-wifi-config-react-native';
 
 const transport = new BleTransport({ deviceNamePrefix: 'ESP32-WiFi-' });
 const protocol = new DeviceProtocol(transport);

@@ -1,5 +1,5 @@
 /**
- * BleTransport — Layer 1 of the ESP WiFi Manager library.
+ * BleTransport — Layer 1 of the ESP WiFi Config library.
  *
  * Wraps react-native-ble-plx to provide:
  *  - BLE scanning filtered by device name prefix
@@ -166,7 +166,7 @@ export class BleTransport extends TypedEventEmitter<BleTransportEvents> {
     const allSeenIds = new Set<string>();
     const seenNames = new Map<string, string | null>();
 
-    this.bleManager.startDeviceScan(null, null, (error: BleError | null, device: Device | null) => {
+    this.bleManager.startDeviceScan(null, { allowDuplicates: true }, (error: BleError | null, device: Device | null) => {
       if (error) {
         // stopDeviceScan() on Android can fire the callback one last time
         // with "Operation was cancelled" — this is expected, not an error.
@@ -192,7 +192,7 @@ export class BleTransport extends TypedEventEmitter<BleTransportEvents> {
         return;
       }
 
-      const name = device.name ?? device.localName;
+      const name = device.localName ?? device.name;
 
       // Track all unique devices for diagnostics
       if (!allSeenIds.has(device.id)) {
@@ -228,22 +228,14 @@ export class BleTransport extends TypedEventEmitter<BleTransportEvents> {
       const prefixLabel = this.config.deviceNamePrefixes.join(', ');
       log.info(`Scan timeout: saw ${total} device(s), ${matched} matched prefixes [${prefixLabel}]`);
 
-      // Surface diagnostic info as an error when no devices matched
-      if (matched === 0 && total > 0) {
-        const names = Array.from(seenNames.values())
-          .filter((n): n is string => n !== null)
-          .slice(0, 5)
-          .join(', ');
-        this.emit(
-          'error',
-          new Error(
-            `Found ${total} BLE device(s) but none matched name prefixes [${prefixLabel}]. ` +
-            `Names seen: [${names || '(all unnamed)'}]`,
-          ),
-        );
-      } else if (total === 0) {
-        this.emit('error', new Error('BLE scan found 0 devices. Is Bluetooth working?'));
-      }
+      const sampleNames = Array.from(seenNames.values())
+        .filter((n): n is string => n !== null)
+        .slice(0, 5);
+
+      // Always emit scanCompleted with diagnostics; the `error` channel is
+      // reserved for true failures so an empty scan doesn't surface as a
+      // banner. UIs handle "no devices" via the empty discovered-list state.
+      this.emit('scanCompleted', { matched, total, sampleNames });
 
       this.stopScan();
     }, this.config.scanTimeoutMs);
@@ -376,7 +368,7 @@ export class BleTransport extends TypedEventEmitter<BleTransportEvents> {
       );
 
       // 7. Build the connected device info.
-      const deviceName = discoveredDevice.name ?? discoveredDevice.localName ?? deviceId;
+      const deviceName = discoveredDevice.localName ?? discoveredDevice.name ?? deviceId;
       this._connectedDeviceInfo = {
         id: discoveredDevice.id,
         name: deviceName,

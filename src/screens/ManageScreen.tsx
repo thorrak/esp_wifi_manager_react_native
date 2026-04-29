@@ -584,7 +584,7 @@ export function ManageScreen({ theme }: ManageScreenProps) {
   const c = { ...DEFAULT_COLORS, ...theme?.colors };
   const borderRadius = theme?.borderRadius ?? 12;
 
-  const { reset, provisioningError } = useProvisioning();
+  const { cancel, error } = useProvisioning();
 
   return (
     <View style={[styles.container, { backgroundColor: c.background }]}>
@@ -592,7 +592,7 @@ export function ManageScreen({ theme }: ManageScreenProps) {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        <ErrorBanner message={provisioningError} theme={theme} />
+        <ErrorBanner message={error?.message ?? null} theme={theme} />
 
         <SavedNetworksSection
           colors={c}
@@ -616,7 +616,7 @@ export function ManageScreen({ theme }: ManageScreenProps) {
 
         <TouchableOpacity
           style={[styles.backButton, { borderRadius }]}
-          onPress={reset}
+          onPress={() => void cancel()}
           activeOpacity={0.8}
         >
           <Text style={[styles.backButtonText, { color: c.textSecondary }]}>

@@ -27,8 +27,9 @@ export function WelcomeScreen({ theme }: WelcomeScreenProps) {
   const c = { ...DEFAULT_COLORS, ...theme?.colors };
   const borderRadius = theme?.borderRadius ?? 12;
 
-  const { scanForDevices, provisioningError } = useProvisioning();
-  const { scanning, bleError, bleErrorCode } = useDeviceScanner();
+  const { start, error } = useProvisioning();
+  const { scanning } = useDeviceScanner();
+  const isUnauthorized = error?.source === 'ble' && error.code === 'unauthorized';
 
   return (
     <View style={[styles.container, { backgroundColor: c.background }]}>
@@ -49,9 +50,9 @@ export function WelcomeScreen({ theme }: WelcomeScreenProps) {
           Connect to your ESP32 device to configure WiFi
         </Text>
 
-        <ErrorBanner message={provisioningError ?? bleError} theme={theme} />
+        <ErrorBanner message={error?.message ?? null} theme={theme} />
 
-        {bleErrorCode === 'unauthorized' && !scanning && (
+        {isUnauthorized && !scanning && (
           <TouchableOpacity
             style={[
               styles.settingsButton,
@@ -74,7 +75,7 @@ export function WelcomeScreen({ theme }: WelcomeScreenProps) {
               styles.button,
               { backgroundColor: c.primary, borderRadius },
             ]}
-            onPress={scanForDevices}
+            onPress={() => void start()}
             activeOpacity={0.8}
           >
             <Text style={[styles.buttonText, { color: c.primaryText }]}>

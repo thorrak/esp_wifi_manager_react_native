@@ -1,61 +1,90 @@
-import { useProvisioningStore } from '../store/provisioningStore';
-import { stepNumber } from '../types/provisioning';
+/**
+ * Primary wizard hook. Returns every piece of provisioning state plus every
+ * action verb needed to drive the flow.
+ *
+ * The shape mirrors `ProvisioningStoreState` + `ProvisioningStoreActions`
+ * but is curated so consumers don't need to know about Zustand internals
+ * or the underlying service classes.
+ */
 
+import { useProvisioningStore } from '../store/provisioningStore';
+import { stepNumber as toStepNumber } from '../types/provisioning';
+
+/**
+ * Drives the provisioning wizard. Read `step` to know what to render and
+ * call the matching action verb to advance.
+ *
+ * @example
+ * const {
+ *   step, device, error, scannedNetworks,
+ *   start, chooseDevice, chooseNetwork, submitPassword, cancel,
+ * } = useProvisioning();
+ *
+ * @see ProvisioningStep for the canonical step machine.
+ * @see ProvisioningError for the error envelope shape.
+ */
 export function useProvisioning() {
+  // -- Wizard --
   const step = useProvisioningStore((s) => s.step);
-  const selectedNetwork = useProvisioningStore((s) => s.selectedNetwork);
+  const error = useProvisioningStore((s) => s.error);
+  const lastResult = useProvisioningStore((s) => s.lastResult);
+
+  // -- Devices --
+  const device = useProvisioningStore((s) => s.device);
+
+  // -- WiFi --
   const scannedNetworks = useProvisioningStore((s) => s.scannedNetworks);
-  const provisioningError = useProvisioningStore((s) => s.provisioningError);
-  const connectionState = useProvisioningStore((s) => s.connectionState);
-  const deviceName = useProvisioningStore((s) => s.deviceName);
+  const selectedNetwork = useProvisioningStore((s) => s.selectedNetwork);
   const wifiState = useProvisioningStore((s) => s.wifiState);
-  const wifiIp = useProvisioningStore((s) => s.wifiIp);
   const wifiSsid = useProvisioningStore((s) => s.wifiSsid);
+  const wifiIp = useProvisioningStore((s) => s.wifiIp);
   const wifiRssi = useProvisioningStore((s) => s.wifiRssi);
   const wifiQuality = useProvisioningStore((s) => s.wifiQuality);
-  const connectionFailed = useProvisioningStore((s) => s.connectionFailed);
-  const pollError = useProvisioningStore((s) => s.pollError);
   const polling = useProvisioningStore((s) => s.polling);
-  const busy = useProvisioningStore((s) => s.busy);
 
-  const scanForDevices = useProvisioningStore((s) => s.provisioningScanForDevices);
-  const connectToDevice = useProvisioningStore((s) => s.provisioningConnectToDevice);
-  const scanWifiNetworks = useProvisioningStore((s) => s.provisioningScanWifiNetworks);
-  const selectNetwork = useProvisioningStore((s) => s.provisioningSelectNetwork);
-  const submitCredentials = useProvisioningStore((s) => s.provisioningSubmitCredentials);
-  const retryConnection = useProvisioningStore((s) => s.provisioningRetryConnection);
-  const deleteNetworkAndReturn = useProvisioningStore((s) => s.provisioningDeleteNetworkAndReturn);
-  const goToNetworks = useProvisioningStore((s) => s.provisioningGoToNetworks);
-  const goToManage = useProvisioningStore((s) => s.provisioningGoToManage);
-  const reset = useProvisioningStore((s) => s.provisioningReset);
+  // -- Action verbs (see ProvisioningManager for canonical descriptions) --
+  const start = useProvisioningStore((s) => s.start);
+  const chooseDevice = useProvisioningStore((s) => s.chooseDevice);
+  const proceedFromConfigure = useProvisioningStore((s) => s.proceedFromConfigure);
+  const rescanWifi = useProvisioningStore((s) => s.rescanWifi);
+  const chooseNetwork = useProvisioningStore((s) => s.chooseNetwork);
+  const backToNetworks = useProvisioningStore((s) => s.backToNetworks);
+  const submitPassword = useProvisioningStore((s) => s.submitPassword);
+  const retryJoin = useProvisioningStore((s) => s.retryJoin);
+  const pickDifferentNetwork = useProvisioningStore((s) => s.pickDifferentNetwork);
+  const pickDifferentDevice = useProvisioningStore((s) => s.pickDifferentDevice);
+  const cancel = useProvisioningStore((s) => s.cancel);
+  const goToManage = useProvisioningStore((s) => s.goToManage);
 
   return {
+    // -- State --
     step,
-    stepNumber: stepNumber(step),
-    selectedNetwork,
+    /** 1-based user-visible numbered step, or `null` for non-numbered states. */
+    stepNumber: toStepNumber(step),
+    error,
+    lastResult,
+    device,
     scannedNetworks,
-    provisioningError,
-    connectionState,
-    deviceName,
+    selectedNetwork,
     wifiState,
-    wifiIp,
     wifiSsid,
+    wifiIp,
     wifiRssi,
     wifiQuality,
-    connectionFailed,
-    pollError,
     polling,
-    busy,
 
-    scanForDevices,
-    connectToDevice,
-    scanWifiNetworks,
-    selectNetwork,
-    submitCredentials,
-    retryConnection,
-    deleteNetworkAndReturn,
-    goToNetworks,
+    // -- Actions --
+    start,
+    chooseDevice,
+    proceedFromConfigure,
+    rescanWifi,
+    chooseNetwork,
+    backToNetworks,
+    submitPassword,
+    retryJoin,
+    pickDifferentNetwork,
+    pickDifferentDevice,
+    cancel,
     goToManage,
-    reset,
   };
 }

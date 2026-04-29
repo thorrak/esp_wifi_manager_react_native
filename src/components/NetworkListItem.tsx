@@ -71,9 +71,20 @@ export function NetworkListItem({
       </View>
       <View style={styles.rightSection}>
         {!isOpen && (
-          <Text style={[styles.lockIcon, { color: c.textSecondary }]}>
-            {'\u{1F512}'}
-          </Text>
+          <View style={styles.lockIcon}>
+            <View
+              style={[
+                styles.lockShackle,
+                { borderColor: c.textSecondary },
+              ]}
+            />
+            <View
+              style={[
+                styles.lockBody,
+                { backgroundColor: c.textSecondary },
+              ]}
+            />
+          </View>
         )}
         <SignalIcon rssi={network.rssi} size={18} theme={theme} />
       </View>
@@ -122,7 +133,20 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   lockIcon: {
-    fontSize: 14,
+    alignItems: 'center',
     marginRight: 8,
+  },
+  lockShackle: {
+    width: 8,
+    height: 5,
+    borderWidth: 1.5,
+    borderBottomWidth: 0,
+    borderTopLeftRadius: 4,
+    borderTopRightRadius: 4,
+  },
+  lockBody: {
+    width: 12,
+    height: 8,
+    borderRadius: 1.5,
   },
 });

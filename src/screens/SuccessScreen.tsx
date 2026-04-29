@@ -28,20 +28,24 @@ export function SuccessScreen({ theme, onComplete }: SuccessScreenProps) {
   const borderRadius = theme?.borderRadius ?? 12;
 
   const {
+    lastResult,
     wifiSsid,
     wifiIp,
     wifiRssi,
     wifiQuality,
     wifiState,
     goToManage,
-    reset,
+    cancel,
   } = useProvisioning();
 
+  // Prefer the latched lastResult — wifiSsid/wifiIp may be cleared if the
+  // device dropped its BLE GATT after a successful provision.
+  const ssid = lastResult?.ssid || wifiSsid;
+  const ip = lastResult?.ip || wifiIp;
+
   const handleDone = () => {
-    if (onComplete) {
-      onComplete();
-    }
-    reset();
+    if (onComplete) onComplete();
+    void cancel();
   };
 
   return (
@@ -84,7 +88,7 @@ export function SuccessScreen({ theme, onComplete }: SuccessScreenProps) {
               Network
             </Text>
             <Text style={[styles.detailValue, { color: c.text }]}>
-              {wifiSsid}
+              {ssid}
             </Text>
           </View>
 
@@ -100,7 +104,7 @@ export function SuccessScreen({ theme, onComplete }: SuccessScreenProps) {
                 { color: c.text, fontFamily: 'monospace' },
               ]}
             >
-              {wifiIp}
+              {ip}
             </Text>
           </View>
 

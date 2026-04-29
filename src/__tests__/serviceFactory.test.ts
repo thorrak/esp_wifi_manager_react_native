@@ -209,7 +209,7 @@ describe('serviceFactory', () => {
     it('passes config through to service constructors', () => {
       initializeServices({
         ble: { deviceNamePrefix: 'Custom-' },
-        pollIntervalMs: 5000,
+        poller: { intervalMs: 5000 },
       });
 
       // Services should be created without errors even with custom config.

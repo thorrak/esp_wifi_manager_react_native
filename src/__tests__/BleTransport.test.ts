@@ -174,29 +174,59 @@ describe('BleTransport', () => {
       expect(discovered[1]!.name).toBe('TiltBridge-ABC');
     });
 
-    it('scan timeout emits diagnostic error with prefix list when no devices match', async () => {
+    it('scan timeout emits scanCompleted (not error) with diagnostics when no devices match', async () => {
       transport = createTransport({
         deviceNamePrefix: ['BrewPi32-', 'TiltBridge-'],
         scanTimeoutMs: 3000,
       });
       const errors: Error[] = [];
+      const completed: Array<{
+        matched: number;
+        total: number;
+        sampleNames: string[];
+      }> = [];
       transport.on('error', (err) => errors.push(err));
+      transport.on('scanCompleted', (info) => completed.push(info));
 
       await transport.startScan();
 
-      const manager = (transport as unknown as { bleManager: BleManager }).bleManager;
+      const manager = (transport as unknown as { bleManager: BleManager })
+        .bleManager;
       const scanCb = getScanCallback(manager);
 
-      // Simulate non-matching devices being seen during the scan window.
       scanCb(null, new Device('dev-1', 'ESP32-WiFi-ABC', -60, 517));
       scanCb(null, new Device('dev-2', 'SomeOther', -70, 517));
 
-      // Fire the scan timeout.
       jest.advanceTimersByTime(3000);
 
-      expect(errors).toHaveLength(1);
-      expect(errors[0]!.message).toContain('none matched name prefixes [BrewPi32-, TiltBridge-]');
-      expect(errors[0]!.message).toContain('ESP32-WiFi-ABC');
+      expect(errors).toHaveLength(0);
+      expect(completed).toHaveLength(1);
+      expect(completed[0]!.matched).toBe(0);
+      expect(completed[0]!.total).toBe(2);
+      expect(completed[0]!.sampleNames).toContain('ESP32-WiFi-ABC');
+    });
+
+    it('scan timeout emits scanCompleted with matched count when devices match', async () => {
+      transport = createTransport({
+        deviceNamePrefix: 'ESP32-WiFi-',
+        scanTimeoutMs: 3000,
+      });
+      const completed: Array<{ matched: number; total: number }> = [];
+      transport.on('scanCompleted', (info) => completed.push(info));
+
+      await transport.startScan();
+      const manager = (transport as unknown as { bleManager: BleManager })
+        .bleManager;
+      const scanCb = getScanCallback(manager);
+
+      scanCb(null, new Device('dev-1', 'ESP32-WiFi-ABC', -60, 517));
+      scanCb(null, new Device('dev-2', 'OtherDevice', -70, 517));
+
+      jest.advanceTimersByTime(3000);
+
+      expect(completed).toHaveLength(1);
+      expect(completed[0]!.matched).toBe(1);
+      expect(completed[0]!.total).toBe(2);
     });
 
     it('startScan deduplicates devices by id', async () => {

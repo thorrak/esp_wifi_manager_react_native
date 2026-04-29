@@ -80,17 +80,19 @@ export function NetworkScanScreen({ theme }: NetworkScanScreenProps) {
   const borderRadius = theme?.borderRadius ?? 12;
 
   const {
+    step,
     scannedNetworks,
-    scanWifiNetworks,
-    selectNetwork,
-    provisioningError,
-    busy,
+    rescanWifi,
+    chooseNetwork,
+    error,
   } = useProvisioning();
+
+  const isScanning = step === 'scanningWifi';
 
   const renderNetwork = ({ item }: { item: ScannedNetwork }) => (
     <NetworkListItemInline
       network={item}
-      onPress={() => selectNetwork(item)}
+      onPress={() => chooseNetwork(item)}
       colors={c}
       borderRadius={borderRadius}
       theme={theme}
@@ -99,9 +101,9 @@ export function NetworkScanScreen({ theme }: NetworkScanScreenProps) {
 
   return (
     <View style={[styles.container, { backgroundColor: c.background }]}>
-      <ErrorBanner message={provisioningError} theme={theme} />
+      <ErrorBanner message={error?.message ?? null} theme={theme} />
 
-      {busy ? (
+      {isScanning ? (
         <LoadingSpinner message="Scanning for networks..." theme={theme} />
       ) : (
         <>
@@ -128,7 +130,7 @@ export function NetworkScanScreen({ theme }: NetworkScanScreenProps) {
                   borderRadius,
                 },
               ]}
-              onPress={scanWifiNetworks}
+              onPress={() => void rescanWifi()}
               activeOpacity={0.8}
             >
               <Text

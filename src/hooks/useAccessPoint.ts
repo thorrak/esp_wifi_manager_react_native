@@ -1,7 +1,16 @@
+/**
+ * Soft AP control hook. Reads/sets the device's access point state via
+ * `start_ap`/`stop_ap` and refreshes status after each mutation.
+ */
+
 import { useState, useEffect, useCallback } from 'react';
 import type { ApStatus, StartApParams } from '../types';
 import { useDeviceProtocol } from './useDeviceProtocol';
 
+/**
+ * @example
+ * const { apStatus, startAp, stopAp, loading, error } = useAccessPoint();
+ */
 export function useAccessPoint() {
   const {
     getApStatus: getApStatusCmd,

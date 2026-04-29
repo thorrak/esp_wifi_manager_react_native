@@ -73,19 +73,20 @@ export function ConnectScreen({ theme }: ConnectScreenProps) {
   const borderRadius = theme?.borderRadius ?? 12;
 
   const {
-    connectToDevice,
-    connectionState,
-    deviceName,
-    provisioningError,
+    step,
+    device,
+    chooseDevice,
+    start,
+    error,
   } = useProvisioning();
-  const { discoveredDevices, scanning, startScan } = useDeviceScanner();
+  const { discoveredDevices, scanning } = useDeviceScanner();
 
-  // Full-screen connecting overlay
-  if (connectionState === 'connecting') {
+  // Sub-step `connectingBle`: full-screen connecting overlay
+  if (step === 'connectingBle' || device?.status === 'connecting') {
     return (
       <View style={[styles.container, { backgroundColor: c.background }]}>
         <LoadingSpinner
-          message={`Connecting to ${deviceName || 'device'}...`}
+          message={`Connecting to ${device?.name || 'device'}...`}
           theme={theme}
         />
       </View>
@@ -95,7 +96,7 @@ export function ConnectScreen({ theme }: ConnectScreenProps) {
   const renderDevice = ({ item }: { item: DiscoveredDevice }) => (
     <DeviceListItemInline
       device={item}
-      onPress={() => connectToDevice(item.id)}
+      onPress={() => void chooseDevice(item)}
       colors={c}
       borderRadius={borderRadius}
     />
@@ -103,7 +104,7 @@ export function ConnectScreen({ theme }: ConnectScreenProps) {
 
   return (
     <View style={[styles.container, { backgroundColor: c.background }]}>
-      <ErrorBanner message={provisioningError} theme={theme} />
+      <ErrorBanner message={error?.message ?? null} theme={theme} />
 
       {scanning && (
         <View style={styles.scanningHeader}>
@@ -141,7 +142,7 @@ export function ConnectScreen({ theme }: ConnectScreenProps) {
               borderRadius,
             },
           ]}
-          onPress={startScan}
+          onPress={() => void start()}
           disabled={scanning}
           activeOpacity={0.8}
         >

@@ -1,11 +1,18 @@
 import type { ProvisioningStep } from '../types';
 
+/**
+ * Logical screen names for the pre-built `ProvisioningNavigator`.
+ *
+ * Some adjacent sub-steps share a screen (e.g. `scanBle` + `connectingBle`
+ * both render `Connect`); the `STEP_TO_SCREEN` map collapses them.
+ */
 export const SCREEN_NAMES = {
   Welcome: 'Welcome',
   Connect: 'Connect',
+  Configure: 'Configure',
   NetworkScan: 'NetworkScan',
   Credentials: 'Credentials',
-  Connecting: 'Connecting',
+  Joining: 'Joining',
   Success: 'Success',
   Manage: 'Manage',
 } as const;
@@ -14,14 +21,21 @@ export type ScreenName = (typeof SCREEN_NAMES)[keyof typeof SCREEN_NAMES];
 
 const STEP_TO_SCREEN: Record<ProvisioningStep, ScreenName> = {
   welcome: SCREEN_NAMES.Welcome,
-  connect: SCREEN_NAMES.Connect,
-  networks: SCREEN_NAMES.NetworkScan,
-  credentials: SCREEN_NAMES.Credentials,
-  connecting: SCREEN_NAMES.Connecting,
+  scanBle: SCREEN_NAMES.Connect,
+  connectingBle: SCREEN_NAMES.Connect,
+  configuring: SCREEN_NAMES.Configure,
+  scanningWifi: SCREEN_NAMES.NetworkScan,
+  chooseNetwork: SCREEN_NAMES.NetworkScan,
+  enterCredentials: SCREEN_NAMES.Credentials,
+  joiningWifi: SCREEN_NAMES.Joining,
   success: SCREEN_NAMES.Success,
   manage: SCREEN_NAMES.Manage,
 };
 
+/**
+ * Convert a step into the corresponding pre-built screen name. Stable across
+ * sub-step transitions that share a screen.
+ */
 export function stepToScreenName(step: ProvisioningStep): ScreenName {
   return STEP_TO_SCREEN[step];
 }

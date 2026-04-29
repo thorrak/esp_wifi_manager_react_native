@@ -1,3 +1,13 @@
+// ===========================================================================
+// esp-wifi-config-react-native — public surface.
+// ---------------------------------------------------------------------------
+// AI-agent guidance: when integrating, prefer the high-level surface
+// (`useProvisioning` + pre-built screens) unless you specifically need
+// raw service classes. Read the canonical step machine in
+// types/provisioning.ts → `ProvisioningStep`. The action verbs returned
+// from `useProvisioning()` map 1:1 to ProvisioningManager methods.
+// ===========================================================================
+
 // ── Types ──
 export type {
   // BLE
@@ -5,6 +15,7 @@ export type {
   BleConnectionState,
   DiscoveredDevice,
   ConnectedDeviceInfo,
+  ScanCompletedInfo,
   BleTransportConfig,
   BleTransportEvents,
   // Protocol
@@ -33,9 +44,14 @@ export type {
   DeviceVariable,
   // Provisioning
   ProvisioningStep,
+  DeviceConnection,
+  ProvisioningError,
+  ProvisioningErrorSource,
   ProvisioningResult,
   ProvisioningConfig,
   ProvisioningTheme,
+  OnConnectedContext,
+  OnConnectedCallback,
   ProvisioningManagerEvents,
 } from './types';
 
@@ -50,11 +66,16 @@ export {
   DEVICE_NAME_PREFIX,
   GATT_SETTLE_MS,
 } from './constants';
-export { PROVISIONING_STEP_ORDER, stepNumber } from './types/provisioning';
+export {
+  PROVISIONING_STEP_ORDER,
+  STEP_NUMBERS,
+  VISIBLE_STEP_COUNT,
+  stepNumber,
+} from './types/provisioning';
 
 // ── Utilities ──
-export { setLogLevel } from './utils';
-export type { LogLevel } from './utils';
+export { setLogLevel, requestBluetoothPermissions } from './utils';
+export type { LogLevel, BlePermissionResult } from './utils';
 
 // ── Service Classes (for headless / advanced use) ──
 export { BleTransport } from './services/BleTransport';
@@ -109,6 +130,7 @@ export {
 export {
   WelcomeScreen,
   ConnectScreen,
+  ConfigureScreen,
   NetworkScanScreen,
   CredentialsScreen,
   ConnectingScreen,
@@ -117,7 +139,7 @@ export {
 } from './screens';
 
 // ── Navigation Utilities ──
-// Note: ProvisioningNavigator is exported from 'esp-wifi-manager-react-native/navigation'
+// Note: ProvisioningNavigator is exported from 'esp-wifi-config-react-native/navigation'
 // to avoid requiring @react-navigation peer deps for hooks-only users.
 export { SCREEN_NAMES, stepToScreenName } from './navigation/navigationConfig';
 export type { ScreenName } from './navigation/navigationConfig';

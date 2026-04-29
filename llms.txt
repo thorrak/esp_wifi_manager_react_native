@@ -1,0 +1,45 @@
+# esp-wifi-config-react-native
+
+> React Native library for BLE-based WiFi provisioning of ESP32 devices running esp_wifi_config firmware. Three integration paths: pre-built navigator, hooks-only custom UI, or headless service classes. Step-machine driven; one error envelope; per-instance hook loading.
+
+If you are an AI agent helping integrate or modify this library, read CLAUDE.md first.
+
+## Documentation
+
+- [CLAUDE.md](CLAUDE.md): Primary agent integration guide. Mental model, step machine table, action verbs, common pitfalls, file map. Read this first.
+- [README.md](README.md): Human-and-agent quick start. Decision tree, install steps, code examples for all three integration paths.
+- [API.md](API.md): Exhaustive symbol reference. Every export with signature and example.
+- [ARCHITECTURE.md](ARCHITECTURE.md): Internal layering and event flow. For contributors.
+- [CHANGELOG.md](CHANGELOG.md): Version history.
+- [bluetooth-provisioning.md](bluetooth-provisioning.md): Firmware-side BLE protocol specification.
+
+## Guides
+
+- [GUIDES/01-quick-start.md](GUIDES/01-quick-start.md): Minimal Expo app from zero to provisioned device.
+- [GUIDES/02-custom-ui-with-hooks.md](GUIDES/02-custom-ui-with-hooks.md): Building a wizard from useProvisioning only.
+- [GUIDES/03-headless-usage.md](GUIDES/03-headless-usage.md): BleTransport + DeviceProtocol in non-React code.
+- [GUIDES/04-pre-wifi-customization.md](GUIDES/04-pre-wifi-customization.md): Using onConnected to set hostname or app variables before WiFi.
+- [GUIDES/05-error-handling.md](GUIDES/05-error-handling.md): The unified ProvisioningError model in depth.
+- [GUIDES/06-managing-saved-networks.md](GUIDES/06-managing-saved-networks.md): Post-provision device management.
+- [GUIDES/07-testing-your-integration.md](GUIDES/07-testing-your-integration.md): Mocking transport for unit tests.
+
+## Examples
+
+- [examples/minimal-app.tsx](examples/minimal-app.tsx): Bare ProvisioningNavigator inside Expo Router.
+- [examples/custom-wizard.tsx](examples/custom-wizard.tsx): Hooks-driven wizard, ~200 lines.
+- [examples/with-onconnected.tsx](examples/with-onconnected.tsx): Pre-WiFi mDNS hostname setup.
+- [examples/headless-script.ts](examples/headless-script.ts): Non-React provisioning script.
+
+## Source map
+
+- src/types/provisioning.ts: ProvisioningStep enum, error model, config shape, manager events.
+- src/services/ProvisioningManager.ts: Wizard step machine and verb-based actions.
+- src/services/BleTransport.ts: Layer 1, BLE I/O.
+- src/services/DeviceProtocol.ts: Layer 2, JSON command/response.
+- src/services/ConnectionPoller.ts: Layer 3, periodic get_status.
+- src/store/provisioningStore.ts: Zustand store wiring service events to React state.
+- src/hooks/useProvisioning.ts: Primary wizard hook.
+- src/hooks/: Other hooks (useDeviceScanner, useBleConnection, useWifiStatus, useDeviceProtocol, useDeviceVariables, useSavedNetworks, useAccessPoint).
+- src/screens/: Pre-built screens.
+- src/navigation/ProvisioningNavigator.tsx: Drop-in wizard navigator.
+- src/utils/permissions.ts: requestBluetoothPermissions helper.

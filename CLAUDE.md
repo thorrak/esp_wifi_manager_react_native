@@ -1,77 +1,236 @@
-# CLAUDE.md
+# CLAUDE.md — agent integration guide
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+This file is the canonical entry point for AI agents (Claude Code, etc.) integrating or modifying this library. Read it first. Cross-references in here point to the source of truth for each topic.
 
-## Commands
+## What this library does
 
-```bash
-npm run build        # react-native-builder-bob → lib/ (commonjs + module + typescript)
-npm run typecheck    # tsc --noEmit
-npm run lint         # eslint "src/**/*.{ts,tsx}"
-npm test             # jest (ts-jest, node env) — all 11 test files
-npm test -- --testPathPattern=BleTransport   # run a single test file
+`esp-wifi-config-react-native` is a React Native library that lets a mobile app provision WiFi credentials onto an ESP32 device over BLE. The device must be running [esp_wifi_config](https://github.com/thorrak/esp_wifi_config) firmware and advertising the configurable BLE GATT service.
+
+Three integration paths, in order of decreasing abstraction:
+
+| Path | When to use | Where to start |
+|------|------|------|
+| Pre-built `ProvisioningNavigator` | You want a working wizard with zero UI work | `import { ProvisioningNavigator } from 'esp-wifi-config-react-native/navigation'` |
+| `useProvisioning` hook + custom UI | You want full control over screens but the same state machine | `import { useProvisioning } from 'esp-wifi-config-react-native'` |
+| Service classes (`BleTransport`, `DeviceProtocol`, `ConnectionPoller`, `ProvisioningManager`) | Headless / non-React / advanced | `import { BleTransport, DeviceProtocol } from 'esp-wifi-config-react-native'` |
+
+## Mental model — four layers
+
+```
+BleTransport   ── BLE I/O: scanning, connecting, GATT writes, JSON reassembly
+     ↓
+DeviceProtocol ── JSON command/response envelope, typed helpers, timeouts
+     ↓
+ConnectionPoller ── periodic get_status, success/failure/timeout detection
+     ↓
+ProvisioningManager ── wizard step machine, error wrapping, onConnected hook
+     ↓
+Zustand store ── reactive state for hooks
+     ↓
+React hooks ── thin selectors + per-instance loading/error trackers
+     ↓
+Pre-built screens / your UI
 ```
 
-## Architecture
+Each layer only depends on the one below it. The store IS the canonical reactive state.
 
-React Native library for BLE WiFi provisioning of ESP32 devices. Four-layer service stack, each layer depends only on the one below:
+## The step machine — single source of truth
 
+Every distinct UI state has its own step. Drive your UI off `step`; never derive shadow phase enums.
+
+| Step | What's on screen | What advances it |
+|------|------|------|
+| `welcome` | Intro, "scan" CTA | `start()` |
+| `scanBle` | Device list, scanning indicator | tap a device → `chooseDevice(d)` |
+| `connectingBle` | Device list w/ spinner overlay | (auto: BLE handshake completes) |
+| `configuring` | Pre-WiFi setup screen | `proceedFromConfigure()` (auto if no `onConnected`) |
+| `scanningWifi` | Loading spinner | (auto: WiFi scan completes) |
+| `chooseNetwork` | Network list | tap a network → `chooseNetwork(n)` |
+| `enterCredentials` | Password input | `submitPassword(pw)` |
+| `joiningWifi` | Joining progress + status | poller terminal event |
+| `success` | Result summary | `goToManage()` or done |
+| `manage` | Post-provision device tools | (terminal) |
+
+Source: `src/types/provisioning.ts` → `ProvisioningStep`. Numbered steps via `STEP_NUMBERS` (sub-states share a number, so progress dots are stable).
+
+## The action verbs — 1:1 with user intent
+
+`useProvisioning()` returns these. Each maps to `ProvisioningManager` and has a corresponding store action.
+
+| Verb | Effect |
+|------|------|
+| `start()` | welcome → scanBle, starts BLE scan |
+| `chooseDevice(target)` | scanBle → connectingBle → configuring → scanningWifi → chooseNetwork |
+| `proceedFromConfigure()` | configuring → scanningWifi → chooseNetwork |
+| `chooseNetwork(network)` | chooseNetwork → enterCredentials |
+| `backToNetworks()` | enterCredentials → chooseNetwork |
+| `submitPassword(pw)` | enterCredentials → joiningWifi (sends add_network + connect, starts poller) |
+| `retryJoin()` | re-issue connect from joiningWifi |
+| `pickDifferentNetwork()` | joiningWifi → chooseNetwork (deletes the failed network) |
+| `pickDifferentDevice()` | any step → scanBle (disconnects, scans again) |
+| `cancel()` | any step → welcome (full reset, preserves `lastResult`) |
+| `goToManage()` | success → manage |
+| `rescanWifi()` | rerun WiFi scan from chooseNetwork |
+
+## The state shape — what `useProvisioning` returns
+
+```ts
+{
+  step,               // ProvisioningStep
+  stepNumber,         // 1..5 | null
+  error,              // ProvisioningError | null  ← unified envelope
+  lastResult,         // ProvisioningResult | null  ← survives cancel()
+  device,             // DeviceConnection | null  ← discriminated union
+  scannedNetworks,    // ScannedNetwork[]
+  selectedNetwork,    // ScannedNetwork | null
+  wifiState, wifiSsid, wifiIp, wifiRssi, wifiQuality, polling,
+  // …action verbs
+}
 ```
-BleTransport → DeviceProtocol → ConnectionPoller → ProvisioningManager
-                                                          ↓
-                                                    provisioningStore (Zustand)
-                                                          ↓
-                                                    8 hooks (thin selectors)
-                                                          ↓
-                                                    Components / Screens (optional)
+
+### `error` shape
+
+```ts
+type ProvisioningError = {
+  source: 'ble' | 'protocol' | 'poller' | 'flow';
+  code?: string;        // e.g. 'unauthorized', 'connection_failed'
+  message: string;      // for direct display
+  recoverable: boolean; // true → user can retry from same step
+};
 ```
 
-**Services** (`src/services/`) — plain TypeScript, no React dependency:
-- `BleTransport` — react-native-ble-plx wrapper: scanning, GATT I/O, chunked JSON reassembly, notification monitoring
-- `DeviceProtocol` — JSON command/response envelope, typed command helpers, timeout management, one-at-a-time command execution
-- `ConnectionPoller` — periodic `get_status` polling with success/failure/timeout detection
-- `ProvisioningManager` — wizard state machine orchestrating the other three services
+Read `error.message` to display. Use `error.recoverable` to decide whether to show "Retry" vs "Start over". Use `error.code` for targeted handling (e.g. `'unauthorized'` → "Open Settings" link).
 
-**`serviceFactory.ts`** — lazy singleton wiring. `getManager()`/`getTransport()`/etc. auto-init on first call. `initializeServices(config?)` is idempotent (no-op if already initialized); call `destroyServices()` first to force re-creation. `destroyServices()` is async — it nulls references synchronously (unblocking re-init) then awaits BLE teardown.
+### `device` shape
 
-**Store** (`src/store/provisioningStore.ts`) — single Zustand store subscribing to service events, bridges services to React.
+```ts
+type DeviceConnection =
+  | null
+  | { status: 'connecting'; id; name; rssi: number | null }
+  | { status: 'connected'; id; name; mtu: number | null };
+```
 
-**Hooks** (`src/hooks/`) — thin selectors over the store. Hooks work standalone without pre-built UI.
+`device?.status === 'connecting'` is true while the BLE handshake runs. `device?.name` is stable from the moment the user taps a device through end-of-flow.
 
-**Two package exports:**
-- `.` — main library (hooks, store, services, components)
-- `./navigation` — optional `ProvisioningNavigator` (requires `@react-navigation/*` peer deps)
+## The 5 most common pitfalls
 
-## BLE Protocol
+1. **Don't derive your own phase enum.** The 10-step machine already encodes every distinct phase. Look up the right step for what you want to render; don't compute booleans like `busy && !networks.length` to derive "we're scanning".
 
-- Service UUID: `0xFFE0`, Chars: `0xFFE1` (status/notify), `0xFFE2` (command/write), `0xFFE3` (response/notify)
-- Constants in `src/constants/ble.ts`, command types in `src/types/protocol.ts`
-- react-native-ble-plx uses base64 for characteristic values; utilities in `src/utils/base64.ts`
-- 120ms GATT settle delay between writes (`GATT_SETTLE_MS`)
-- Chunked response reassembly: buffer notifications until buffer ends with `}`
-- `BleTransportConfig.deviceNamePrefix` accepts `string | string[]` — `normalizePrefixes()` in `BleTransport.ts` coerces to `string[]` (defaults to `[DEVICE_NAME_PREFIX]`). Internally stored as `deviceNamePrefixes: string[]` in `ResolvedConfig`
+2. **Don't read multiple error fields.** There is one: `error`. Sources are tagged via `error.source`. The old `bleError` / `pollError` / `provisioningError` fields are gone.
 
-## Key Patterns and Gotchas
+3. **Don't use `lastResult` for in-flow status.** It only fills in on `success`. While the wizard is running, read `wifiSsid`/`wifiIp`/`device.name` directly.
 
-- **TypedEventEmitter**: use `{ [K in keyof T]: (...args: any[]) => void }` — interfaces lack implicit index signatures, so `Record<string, ...>` won't work
-- **Command nonce**: `DeviceProtocol` uses a monotonic nonce to prevent stale `.catch()` handlers from rejecting subsequent commands
-- **Destroy abandons commands**: `DeviceProtocol.destroy()` abandons pending commands (increments nonce, nulls handlers) instead of rejecting — avoids unhandled promise rejections during teardown
-- **BleTransport `_destroyed` guard**: after `destroy()`, notification callbacks and `writeCommand()` bail out early to prevent stale native callbacks from surfacing
-- **Reset ordering**: `ProvisioningManager.reset()` must set `_step='welcome'` BEFORE calling `transport.disconnect()` to avoid spurious disconnect listener trigger
-- **BLE adapter readiness**: uses polling (`waitForPoweredOn`) instead of `onStateChange(_, true)` — ble-plx has an unhandled-rejection bug when CBCentralManager is in Unknown state
-- **Scan error path**: `BleTransport` must emit `scanStopped` to clear store's `scanning` flag
-- **Scan diagnostics**: when scan timeout fires with no matching devices, `BleTransport` emits an `error` event with diagnostic info (device count, names seen). Surfaced via `bleError` in the store and `useDeviceScanner` hook
-- **Navigation isolation**: `ProvisioningNavigator` wraps its stack in its own `NavigationContainer` + `NavigationIndependentTree`, so consumers do NOT wrap it in a `NavigationContainer`
-- **Store polling flag**: synced via `stepChanged('connecting')` and poller stop events
-- **Store actions**: must match exact positional argument signatures of service methods, not object shapes
-- **Store destroy is fire-and-forget**: `destroy()` action calls `void destroyServices()` — store state resets immediately, async BLE teardown settles in background
+4. **Don't gate effects on a global `busy` flag.** There isn't one. Each hook (`useDeviceVariables`, `useDeviceProtocol`) tracks its own `loading` per-instance. Use that.
 
-## Testing
+5. **Don't throw from `flow.onConnected` and hope the user notices.** The manager parks on `configuring` with a `flow`-source error. Render that error on your configure screen; offer a retry that calls `proceedFromConfigure()` (skip the failure) or `pickDifferentDevice()` (start over).
 
-11 test files under `src/__tests__/`. Mocks at `src/__mocks__/react-native-ble-plx.ts` and `src/__mocks__/react-native.ts`. Tests run in Node (no React Native runtime needed).
+## Pre-WiFi customization — `flow.onConnected`
 
-## Dependencies
+Use this when you need to talk to the device before WiFi is provisioned (e.g. set hostname, app config keys, validate firmware version).
 
-- **Required peer dep**: `react-native-ble-plx` >= 3.0
-- **Optional peer deps** (pre-built UI only): `@react-navigation/native` >= 7, `@react-navigation/native-stack` >= 7, `react-native-screens` >= 4, `react-native-safe-area-context` >= 4
-- **Direct dep**: `zustand` ^5.0.0
+```ts
+import { initializeServices } from 'esp-wifi-config-react-native';
+
+initializeServices({
+  flow: {
+    onConnected: async ({ protocol }) => {
+      const v = await protocol.getVar('mdns_name');
+      if (!v.value) await protocol.setVar('mdns_name', 'my-device');
+    },
+  },
+});
+```
+
+The callback runs after BLE connect, before the WiFi scan. Throwing surfaces as `ProvisioningError { source: 'flow', recoverable: true }`. Skip it via `useProvisioning().proceedFromConfigure()` or restart with `pickDifferentDevice()`.
+
+If you don't supply `onConnected`, the `configuring` step auto-advances and the user sees no extra screen.
+
+## Permissions
+
+```ts
+import { requestBluetoothPermissions, Linking } from 'esp-wifi-config-react-native';
+
+const r = await requestBluetoothPermissions();
+if (!r.granted) {
+  if (r.reason === 'never_ask_again') Linking.openSettings();
+  return;
+}
+await store.start();
+```
+
+Handles iOS (no-op, granted by Info.plist + first-use OS dialog) and Android 12+/<12 (BLUETOOTH_SCAN/CONNECT vs ACCESS_FINE_LOCATION).
+
+## Headless usage
+
+```ts
+import { BleTransport, DeviceProtocol } from 'esp-wifi-config-react-native';
+
+const transport = new BleTransport({ deviceNamePrefix: 'MyDevice-' });
+const protocol = new DeviceProtocol(transport);
+
+transport.on('deviceDiscovered', async (d) => {
+  transport.stopScan();
+  await transport.connect(d.id);
+  await protocol.addNetwork({ ssid: 'X', password: 'Y' });
+  await protocol.connectWifi('X');
+});
+
+await transport.startScan();
+```
+
+No React, no store, no manager. Useful for tests or background tasks.
+
+## Configuration shape
+
+```ts
+type ProvisioningConfig = {
+  ble?: { deviceNamePrefix?: string | string[]; scanTimeoutMs?; … };
+  protocol?: { defaultTimeoutMs?; commandTimeouts? };
+  poller?: { intervalMs?: number; timeoutMs?: number };
+  flow?: {
+    onConnected?: (ctx: { protocol; transport }) => Promise<void>;
+    defaultNetworkPriority?: number;
+    autoConnectOpenNetworks?: boolean;
+  };
+};
+```
+
+Pass to `<ProvisioningNavigator config={...} />` or `initializeServices(config)` once before any hook usage.
+
+## File map (where to look for each concern)
+
+- Step machine, types, config: `src/types/provisioning.ts`
+- BLE protocol details: `bluetooth-provisioning.md`
+- Manager logic: `src/services/ProvisioningManager.ts`
+- Store wiring: `src/store/provisioningStore.ts`
+- Primary hook: `src/hooks/useProvisioning.ts`
+- Pre-built screens: `src/screens/`
+- Pre-built navigator: `src/navigation/ProvisioningNavigator.tsx`
+- Permissions helper: `src/utils/permissions.ts`
+
+## Deeper reading
+
+- `README.md` — quick-start with full code examples
+- `GUIDES/01-quick-start.md` — minimal Expo app from zero to provisioned
+- `GUIDES/02-custom-ui-with-hooks.md` — wizard from `useProvisioning` only
+- `GUIDES/03-headless-usage.md` — service classes in non-React code
+- `GUIDES/04-pre-wifi-customization.md` — using `onConnected` for app config
+- `GUIDES/05-error-handling.md` — `ProvisioningError` model in depth
+- `GUIDES/06-managing-saved-networks.md` — post-provision device management
+- `GUIDES/07-testing-your-integration.md` — mocking transport for unit tests
+- `ARCHITECTURE.md` — internal layering, event flow, contributor guide
+- `API.md` — exhaustive symbol reference
+
+## Code style notes
+
+- Every public export gets at least one-line JSDoc + `@example` for non-trivial APIs.
+- Tests are in `src/__tests__/`. Run with `npm test`. ProvisioningManager tests are the canonical specification of step transitions.
+- Build with `npm run build` (CommonJS + ESM + `.d.ts`).
+- Typecheck: `npm run typecheck`. Lint: `npm run lint`.
+
+## Don't
+
+- Don't add new top-level error fields to the store. Route everything through `setError({ source, code?, message, recoverable })`.
+- Don't add new step values without updating `STEP_NUMBERS`, `PROVISIONING_STEP_ORDER`, and `stepToScreenName`.
+- Don't reach into `ProvisioningManager` from screens; go through `useProvisioning()`.
+- Don't use the BLE `error` event for "no devices found". Listen to `scanCompleted` for diagnostics.

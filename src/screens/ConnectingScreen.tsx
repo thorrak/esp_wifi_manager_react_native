@@ -31,21 +31,22 @@ export function ConnectingScreen({ theme }: ConnectingScreenProps) {
     wifiSsid,
     wifiState,
     selectedNetwork,
-    connectionFailed,
-    pollError,
-    provisioningError,
-    retryConnection,
-    deleteNetworkAndReturn,
-    reset,
+    error,
+    retryJoin,
+    pickDifferentNetwork,
+    cancel,
   } = useProvisioning();
 
   const targetSsid = wifiSsid || selectedNetwork?.ssid || '';
+  const failureCode = error?.source === 'poller' ? error.code : null;
+  const isConnectionFailed = failureCode === 'connection_failed';
+  const isTimeout = failureCode === 'connection_timeout';
 
   // Sub-state: Connection failed
-  if (connectionFailed) {
+  if (isConnectionFailed) {
     return (
       <View style={[styles.container, { backgroundColor: c.background }]}>
-        <ErrorBanner message={provisioningError} theme={theme} />
+        <ErrorBanner message={error?.message ?? null} theme={theme} />
         <View style={styles.centerContent}>
           <View
             style={[
@@ -69,7 +70,7 @@ export function ConnectingScreen({ theme }: ConnectingScreenProps) {
               styles.primaryButton,
               { backgroundColor: c.primary, borderRadius },
             ]}
-            onPress={retryConnection}
+            onPress={() => void retryJoin()}
             activeOpacity={0.8}
           >
             <Text style={[styles.primaryButtonText, { color: c.primaryText }]}>
@@ -82,7 +83,7 @@ export function ConnectingScreen({ theme }: ConnectingScreenProps) {
               styles.outlineButton,
               { borderColor: c.primary, borderRadius },
             ]}
-            onPress={deleteNetworkAndReturn}
+            onPress={() => void pickDifferentNetwork()}
             activeOpacity={0.8}
           >
             <Text style={[styles.outlineButtonText, { color: c.primary }]}>
@@ -92,7 +93,7 @@ export function ConnectingScreen({ theme }: ConnectingScreenProps) {
 
           <TouchableOpacity
             style={[styles.textButton, { borderRadius }]}
-            onPress={reset}
+            onPress={() => void cancel()}
             activeOpacity={0.8}
           >
             <Text style={[styles.textButtonText, { color: c.textSecondary }]}>
@@ -105,10 +106,10 @@ export function ConnectingScreen({ theme }: ConnectingScreenProps) {
   }
 
   // Sub-state: Poll error / timed out
-  if (pollError) {
+  if (isTimeout) {
     return (
       <View style={[styles.container, { backgroundColor: c.background }]}>
-        <ErrorBanner message={provisioningError} theme={theme} />
+        <ErrorBanner message={error?.message ?? null} theme={theme} />
         <View style={styles.centerContent}>
           <View
             style={[
@@ -123,7 +124,7 @@ export function ConnectingScreen({ theme }: ConnectingScreenProps) {
             Connection Timed Out
           </Text>
           <Text style={[styles.subtitle, { color: c.textSecondary }]}>
-            {pollError}
+            {error?.message ?? 'The device did not finish connecting in time.'}
           </Text>
 
           <TouchableOpacity
@@ -131,7 +132,7 @@ export function ConnectingScreen({ theme }: ConnectingScreenProps) {
               styles.primaryButton,
               { backgroundColor: c.primary, borderRadius },
             ]}
-            onPress={retryConnection}
+            onPress={() => void retryJoin()}
             activeOpacity={0.8}
           >
             <Text style={[styles.primaryButtonText, { color: c.primaryText }]}>
@@ -141,7 +142,7 @@ export function ConnectingScreen({ theme }: ConnectingScreenProps) {
 
           <TouchableOpacity
             style={[styles.textButton, { borderRadius }]}
-            onPress={reset}
+            onPress={() => void cancel()}
             activeOpacity={0.8}
           >
             <Text style={[styles.textButtonText, { color: c.textSecondary }]}>
@@ -156,7 +157,7 @@ export function ConnectingScreen({ theme }: ConnectingScreenProps) {
   // Sub-state: Polling / connecting
   return (
     <View style={[styles.container, { backgroundColor: c.background }]}>
-      <ErrorBanner message={provisioningError} theme={theme} />
+      <ErrorBanner message={error?.message ?? null} theme={theme} />
       <View style={styles.centerContent}>
         <LoadingSpinner
           message={`Connecting to ${targetSsid}...`}

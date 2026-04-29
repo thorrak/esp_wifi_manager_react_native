@@ -38,12 +38,28 @@ export interface ConnectedDeviceInfo {
   mtu: number | null;
 }
 
+/** Diagnostic info emitted by `BleTransport` after a scan completes. */
+export interface ScanCompletedInfo {
+  /** Number of devices that matched the configured name prefix(es). */
+  matched: number;
+  /** Total number of unique devices observed during the scan. */
+  total: number;
+  /** Up to 5 names from non-matching devices, for diagnostics. */
+  sampleNames: string[];
+}
+
 export interface BleTransportEvents {
   response: (json: string) => void;
   status: (json: string) => void;
   connectionStateChanged: (state: BleConnectionState) => void;
   deviceDiscovered: (device: DiscoveredDevice) => void;
+  /**
+   * Fires once per scan cycle when the scan timer expires (or `stopScan()`
+   * is called). Always emitted, regardless of whether any devices matched.
+   */
+  scanCompleted: (info: ScanCompletedInfo) => void;
   scanStopped: () => void;
+  /** Emitted only for genuine failures (BLE off, unauthorized, scan_error). */
   error: (error: Error) => void;
 }
 

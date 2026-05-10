@@ -4,7 +4,6 @@ import type { ProvisioningTheme } from '../types';
 import { useProvisioning } from '../hooks/useProvisioning';
 import { ErrorBanner } from '../components/ErrorBanner';
 import { LoadingSpinner } from '../components/LoadingSpinner';
-import { StatusBadge } from '../components/StatusBadge';
 
 const DEFAULT_COLORS = {
   primary: '#2563EB',
@@ -28,8 +27,6 @@ export function ConnectingScreen({ theme }: ConnectingScreenProps) {
   const borderRadius = theme?.borderRadius ?? 12;
 
   const {
-    wifiSsid,
-    wifiState,
     selectedNetwork,
     error,
     retryJoin,
@@ -37,10 +34,13 @@ export function ConnectingScreen({ theme }: ConnectingScreenProps) {
     cancel,
   } = useProvisioning();
 
-  const targetSsid = wifiSsid || selectedNetwork?.ssid || '';
-  const failureCode = error?.source === 'poller' ? error.code : null;
-  const isConnectionFailed = failureCode === 'connection_failed';
-  const isTimeout = failureCode === 'connection_timeout';
+  const targetSsid = selectedNetwork?.ssid || '';
+  // The SDK's atomic provision() bundles "credentials accepted" and
+  // "STA-connect succeeded" — surface any failure as a single
+  // `provision`-source error.
+  const isProvisionFailed = error?.source === 'provision';
+  const isTimeout = isProvisionFailed && /timed out/i.test(error.message);
+  const isConnectionFailed = isProvisionFailed && !isTimeout;
 
   // Sub-state: Connection failed
   if (isConnectionFailed) {
@@ -70,7 +70,7 @@ export function ConnectingScreen({ theme }: ConnectingScreenProps) {
               styles.primaryButton,
               { backgroundColor: c.primary, borderRadius },
             ]}
-            onPress={() => void retryJoin()}
+            onPress={() => void retryJoin()  /* will bounce to credentials so the user re-enters the password */}
             activeOpacity={0.8}
           >
             <Text style={[styles.primaryButtonText, { color: c.primaryText }]}>
@@ -132,7 +132,7 @@ export function ConnectingScreen({ theme }: ConnectingScreenProps) {
               styles.primaryButton,
               { backgroundColor: c.primary, borderRadius },
             ]}
-            onPress={() => void retryJoin()}
+            onPress={() => void retryJoin()  /* will bounce to credentials so the user re-enters the password */}
             activeOpacity={0.8}
           >
             <Text style={[styles.primaryButtonText, { color: c.primaryText }]}>
@@ -154,18 +154,15 @@ export function ConnectingScreen({ theme }: ConnectingScreenProps) {
     );
   }
 
-  // Sub-state: Polling / connecting
+  // Sub-state: provisioning in progress
   return (
     <View style={[styles.container, { backgroundColor: c.background }]}>
       <ErrorBanner message={error?.message ?? null} theme={theme} />
       <View style={styles.centerContent}>
         <LoadingSpinner
-          message={`Connecting to ${targetSsid}...`}
+          message={`Sending credentials and joining ${targetSsid}…`}
           theme={theme}
         />
-        <View style={styles.statusRow}>
-          <StatusBadge state={wifiState} theme={theme} />
-        </View>
       </View>
     </View>
   );

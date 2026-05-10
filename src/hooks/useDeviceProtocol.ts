@@ -1,6 +1,7 @@
 /**
- * Direct access to every device command. Useful for headless / advanced
- * paths that need raw protocol calls outside the wizard flow.
+ * Direct access to the device's custom protocomm endpoints. Useful for
+ * headless / advanced paths that need to read version / capabilities /
+ * variables outside the wizard flow.
  *
  * Each call is tracked: `loading` reflects whether ANY command from this
  * hook instance is in flight, and `error` holds the message of the most
@@ -12,34 +13,28 @@ import { useCallback, useState } from 'react';
 
 import { useProvisioningStore } from '../store/provisioningStore';
 import type {
-  AddNetworkParams,
-  ApStatus,
+  DeviceCapabilities,
+  DeviceNetworkPolicy,
   DeviceVariable,
-  SavedNetwork,
+  DeviceVersionInfo,
   ScannedNetwork,
-  StartApParams,
-  WifiStatus,
 } from '../types';
 
 /**
  * @example
- * const { getStatus, setVar, loading, error } = useDeviceProtocol();
- * const status = await getStatus(); // throws on failure
+ * const { getVersion, listVars, loading, error } = useDeviceProtocol();
+ * const v = await getVersion();           // throws on failure
+ * const vars = await listVars();
  */
 export function useDeviceProtocol() {
-  const getStatusCmd = useProvisioningStore((s) => s.getStatus);
-  const scanNetworksCmd = useProvisioningStore((s) => s.scanNetworks);
-  const listNetworksCmd = useProvisioningStore((s) => s.listNetworks);
-  const addNetworkCmd = useProvisioningStore((s) => s.addNetwork);
-  const delNetworkCmd = useProvisioningStore((s) => s.delNetwork);
-  const connectWifiCmd = useProvisioningStore((s) => s.connectWifi);
-  const disconnectWifiCmd = useProvisioningStore((s) => s.disconnectWifi);
-  const getApStatusCmd = useProvisioningStore((s) => s.getApStatus);
-  const startApCmd = useProvisioningStore((s) => s.startAp);
-  const stopApCmd = useProvisioningStore((s) => s.stopAp);
+  const scanWifiCmd = useProvisioningStore((s) => s.scanWifi);
+  const getVersionCmd = useProvisioningStore((s) => s.getVersion);
+  const getCapabilitiesCmd = useProvisioningStore((s) => s.getCapabilities);
+  const getNetworkPolicyCmd = useProvisioningStore((s) => s.getNetworkPolicy);
+  const listVarsCmd = useProvisioningStore((s) => s.listVars);
   const getVarCmd = useProvisioningStore((s) => s.getVar);
   const setVarCmd = useProvisioningStore((s) => s.setVar);
-  const factoryResetCmd = useProvisioningStore((s) => s.factoryReset);
+  const delVarCmd = useProvisioningStore((s) => s.delVar);
 
   const [inFlight, setInFlight] = useState(0);
   const [error, setError] = useState<string | null>(null);
@@ -57,48 +52,28 @@ export function useDeviceProtocol() {
     }
   }, []);
 
-  const getStatus = useCallback(
-    (): Promise<WifiStatus> => track(getStatusCmd()),
-    [track, getStatusCmd],
+  const scanWifi = useCallback(
+    (): Promise<ScannedNetwork[]> => track(scanWifiCmd()),
+    [track, scanWifiCmd],
   );
-  const scanNetworks = useCallback(
-    (): Promise<ScannedNetwork[]> => track(scanNetworksCmd()),
-    [track, scanNetworksCmd],
+  const getVersion = useCallback(
+    (): Promise<DeviceVersionInfo> => track(getVersionCmd()),
+    [track, getVersionCmd],
   );
-  const listNetworks = useCallback(
-    (): Promise<SavedNetwork[]> => track(listNetworksCmd()),
-    [track, listNetworksCmd],
+  const getCapabilities = useCallback(
+    (): Promise<DeviceCapabilities> => track(getCapabilitiesCmd()),
+    [track, getCapabilitiesCmd],
   );
-  const addNetwork = useCallback(
-    (params: AddNetworkParams): Promise<void> => track(addNetworkCmd(params)),
-    [track, addNetworkCmd],
+  const getNetworkPolicy = useCallback(
+    (): Promise<DeviceNetworkPolicy> => track(getNetworkPolicyCmd()),
+    [track, getNetworkPolicyCmd],
   );
-  const delNetwork = useCallback(
-    (ssid: string): Promise<void> => track(delNetworkCmd(ssid)),
-    [track, delNetworkCmd],
-  );
-  const connectWifi = useCallback(
-    (ssid?: string): Promise<void> => track(connectWifiCmd(ssid)),
-    [track, connectWifiCmd],
-  );
-  const disconnectWifi = useCallback(
-    (): Promise<void> => track(disconnectWifiCmd()),
-    [track, disconnectWifiCmd],
-  );
-  const getApStatus = useCallback(
-    (): Promise<ApStatus> => track(getApStatusCmd()),
-    [track, getApStatusCmd],
-  );
-  const startAp = useCallback(
-    (params?: StartApParams): Promise<void> => track(startApCmd(params)),
-    [track, startApCmd],
-  );
-  const stopAp = useCallback(
-    (): Promise<void> => track(stopApCmd()),
-    [track, stopApCmd],
+  const listVars = useCallback(
+    (): Promise<DeviceVariable[]> => track(listVarsCmd()),
+    [track, listVarsCmd],
   );
   const getVar = useCallback(
-    (key: string): Promise<DeviceVariable> => track(getVarCmd(key)),
+    (key: string): Promise<DeviceVariable | null> => track(getVarCmd(key)),
     [track, getVarCmd],
   );
   const setVar = useCallback(
@@ -106,9 +81,9 @@ export function useDeviceProtocol() {
       track(setVarCmd(key, value)),
     [track, setVarCmd],
   );
-  const factoryReset = useCallback(
-    (): Promise<void> => track(factoryResetCmd()),
-    [track, factoryResetCmd],
+  const delVar = useCallback(
+    (key: string): Promise<void> => track(delVarCmd(key)),
+    [track, delVarCmd],
   );
 
   return {
@@ -117,18 +92,13 @@ export function useDeviceProtocol() {
     /** Message of the most recent failed call from this hook, or null. */
     error,
 
-    getStatus,
-    scanNetworks,
-    listNetworks,
-    addNetwork,
-    delNetwork,
-    connectWifi,
-    disconnectWifi,
-    getApStatus,
-    startAp,
-    stopAp,
+    scanWifi,
+    getVersion,
+    getCapabilities,
+    getNetworkPolicy,
+    listVars,
     getVar,
     setVar,
-    factoryReset,
+    delVar,
   };
 }

@@ -1,5 +1,7 @@
 # Quick start — minimal Expo app
 
+> **v2.x note.** This guide was written against v1's `react-native-ble-plx` peer dep. For v2, replace any `react-native-ble-plx` install / Expo plugin reference with `@orbital-systems/react-native-esp-idf-provisioning`. The library API (hooks, screens, `useProvisioning()`) is unchanged.
+
 **When to use this:** you have an Expo project (or are starting fresh) and want a working WiFi-provisioning screen with the least possible code.
 
 **What you'll end up with:** a single-screen app that opens `ProvisioningNavigator`, scans for ESP32 devices, walks the user through provisioning, and logs the result.

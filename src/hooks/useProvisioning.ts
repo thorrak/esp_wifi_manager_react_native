@@ -28,6 +28,7 @@ export function useProvisioning() {
   const step = useProvisioningStore((s) => s.step);
   const error = useProvisioningStore((s) => s.error);
   const lastResult = useProvisioningStore((s) => s.lastResult);
+  const lastProvisionResult = useProvisioningStore((s) => s.lastProvisionResult);
 
   // -- Devices --
   const device = useProvisioningStore((s) => s.device);
@@ -35,12 +36,6 @@ export function useProvisioning() {
   // -- WiFi --
   const scannedNetworks = useProvisioningStore((s) => s.scannedNetworks);
   const selectedNetwork = useProvisioningStore((s) => s.selectedNetwork);
-  const wifiState = useProvisioningStore((s) => s.wifiState);
-  const wifiSsid = useProvisioningStore((s) => s.wifiSsid);
-  const wifiIp = useProvisioningStore((s) => s.wifiIp);
-  const wifiRssi = useProvisioningStore((s) => s.wifiRssi);
-  const wifiQuality = useProvisioningStore((s) => s.wifiQuality);
-  const polling = useProvisioningStore((s) => s.polling);
 
   // -- Action verbs (see ProvisioningManager for canonical descriptions) --
   const start = useProvisioningStore((s) => s.start);
@@ -63,15 +58,10 @@ export function useProvisioning() {
     stepNumber: toStepNumber(step),
     error,
     lastResult,
+    lastProvisionResult,
     device,
     scannedNetworks,
     selectedNetwork,
-    wifiState,
-    wifiSsid,
-    wifiIp,
-    wifiRssi,
-    wifiQuality,
-    polling,
 
     // -- Actions --
     start,

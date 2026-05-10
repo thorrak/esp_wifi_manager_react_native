@@ -51,7 +51,9 @@ export function DeviceListItem({
           {truncateId(device.id)}
         </Text>
       </View>
-      <SignalIcon rssi={device.rssi} size={18} theme={theme} />
+      {device.rssi != null ? (
+        <SignalIcon rssi={device.rssi} size={18} theme={theme} />
+      ) : null}
     </TouchableOpacity>
   );
 }

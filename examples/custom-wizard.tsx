@@ -44,10 +44,9 @@ export default function CustomWizard() {
     error,
     device,
     lastResult,
+    lastProvisionResult,
     scannedNetworks,
     selectedNetwork,
-    wifiSsid,
-    wifiIp,
     start,
     chooseDevice,
     chooseNetwork,
@@ -220,13 +219,14 @@ export default function CustomWizard() {
       );
 
     case 'success': {
-      const ssid = lastResult?.ssid ?? wifiSsid;
-      const ip = lastResult?.ip ?? wifiIp;
+      const ssid = lastResult?.ssid ?? lastProvisionResult?.ssid;
+      const status =
+        lastProvisionResult?.status ?? lastResult?.provisionStatus ?? 'success';
       return (
         <Container>
           <Text style={styles.title}>Done!</Text>
           <Text style={styles.muted}>{ssid}</Text>
-          <Text style={styles.muted}>{ip}</Text>
+          <Text style={styles.muted}>Status: {status}</Text>
           <Pressable style={styles.button} onPress={() => void cancel()}>
             <Text style={styles.buttonText}>Close</Text>
           </Pressable>

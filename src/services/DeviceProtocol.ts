@@ -1,231 +1,245 @@
-import type {
-  CommandName,
-  DeviceProtocolEvents,
-  DeviceProtocolConfig,
-  AddNetworkParams,
-  StartApParams,
-  WifiStatus,
-  ScanResponseData,
-  ListNetworksResponseData,
-  ApStatus,
-  DeviceVariable,
-  ResponseEnvelope,
-  ResponseEnvelopeOk,
-  ResponseEnvelopeError,
-} from '../types';
+/**
+ * DeviceProtocol — Layer 2 of the ESP WiFi Config library.
+ *
+ * Handles the four custom protocomm endpoints registered by
+ * esp_wifi_config 0.1.0+ (`esp-wifi-config-version`, `…-capabilities`,
+ * `…-vars`, `…-network-policy`) plus thin wrappers around the SDK's
+ * `scanWifiList()` and `provision()` so callers can stay at one
+ * abstraction level.
+ *
+ * Custom endpoint payloads are JSON encoded as UTF-8, then sent through
+ * `ESPDevice.sendData()` which handles base64 framing and protocomm
+ * encryption. The SDK serialises requests internally — there is no need
+ * for our own busy flag, but we still surface a `busyChanged` event for
+ * UI affordances and to keep the v1 hook contract.
+ */
+
 import {
-  DEFAULT_COMMAND_TIMEOUT_MS,
-  COMMAND_TIMEOUTS,
+  ESPWifiAuthMode,
+  type ESPWifiList,
+} from '@orbital-systems/react-native-esp-idf-provisioning';
+
+import type {
+  DeviceCapabilities,
+  DeviceNetworkPolicy,
+  DeviceProtocolConfig,
+  DeviceProtocolEvents,
+  DeviceVariable,
+  DeviceVersionInfo,
+  ScannedNetwork,
+  ProvisionResult,
+  VarsRequest,
+  VarsResponse,
+  WifiAuthType,
+} from '../types';
+
+import {
+  PROV_ENDPOINT_VERSION,
+  PROV_ENDPOINT_CAPABILITIES,
+  PROV_ENDPOINT_VARS,
+  PROV_ENDPOINT_NETWORK_POLICY,
+  DEFAULT_ENDPOINT_TIMEOUT_MS,
+  DEFAULT_WIFI_SCAN_TIMEOUT_MS,
+  DEFAULT_PROVISION_TIMEOUT_MS,
 } from '../constants/protocol';
+
 import { TypedEventEmitter, createLogger } from '../utils';
+import { Buffer } from 'buffer';
+
 import type { BleTransport } from './BleTransport';
 
 const log = createLogger('DeviceProtocol');
 
-/**
- * Layer 2 — JSON command/response protocol over BLE.
- *
- * Sends structured command envelopes to the device via {@link BleTransport}
- * and resolves the corresponding promise when a response arrives.
- * Only one command may be in-flight at a time.
- */
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+function authModeToString(mode: ESPWifiAuthMode | number): WifiAuthType {
+  switch (mode) {
+    case ESPWifiAuthMode.open:
+      return 'OPEN';
+    case ESPWifiAuthMode.wep:
+      return 'WEP';
+    case ESPWifiAuthMode.wpa2Enterprise:
+      return 'WPA2_ENTERPRISE';
+    case ESPWifiAuthMode.wpa2Psk:
+      return 'WPA2';
+    case ESPWifiAuthMode.wpaPsk:
+      return 'WPA';
+    case ESPWifiAuthMode.wpaWpa2Psk:
+      return 'WPA/WPA2';
+    case ESPWifiAuthMode.wpa3Psk:
+      return 'WPA3';
+    case ESPWifiAuthMode.wpa2Wpa3Psk:
+      return 'WPA2/WPA3';
+    default:
+      return 'UNKNOWN';
+  }
+}
+
+function withTimeout<T>(
+  promise: Promise<T>,
+  ms: number,
+  label: string,
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      reject(new Error(`${label} timed out after ${ms}ms`));
+    }, ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => {
+    if (timer !== null) clearTimeout(timer);
+  });
+}
+
+// ---------------------------------------------------------------------------
+// DeviceProtocol
+// ---------------------------------------------------------------------------
+
 export class DeviceProtocol extends TypedEventEmitter<DeviceProtocolEvents> {
   private readonly transport: BleTransport;
-  private readonly config: Required<
-    Pick<DeviceProtocolConfig, 'defaultTimeoutMs'>
-  > &
-    Pick<DeviceProtocolConfig, 'commandTimeouts'>;
-
-  private _busy = false;
-  private pendingResolve: ((value: unknown) => void) | null = null;
-  private pendingReject: ((reason: Error) => void) | null = null;
-  private pendingCommand: CommandName | null = null;
-  private timeoutTimer: ReturnType<typeof setTimeout> | null = null;
-  private lastCommandTime = 0;
-  /** Monotonically increasing nonce to guard against stale .catch() handlers */
-  private commandNonce = 0;
+  private readonly config: Required<Pick<DeviceProtocolConfig, 'defaultTimeoutMs'>> &
+    Pick<DeviceProtocolConfig, 'endpointTimeouts'>;
+  private inFlight = 0;
 
   constructor(transport: BleTransport, config?: DeviceProtocolConfig) {
     super();
     this.transport = transport;
     this.config = {
-      defaultTimeoutMs:
-        config?.defaultTimeoutMs ?? DEFAULT_COMMAND_TIMEOUT_MS,
-      commandTimeouts: config?.commandTimeouts,
+      defaultTimeoutMs: config?.defaultTimeoutMs ?? DEFAULT_ENDPOINT_TIMEOUT_MS,
+      endpointTimeouts: config?.endpointTimeouts,
     };
-
-    // Bind once so we can remove the exact reference in destroy().
-    this.handleResponse = this.handleResponse.bind(this);
-    this.transport.on('response', this.handleResponse);
   }
 
   // ---------------------------------------------------------------------------
-  // Public API
+  // Public API — standard endpoints (delegated to SDK)
   // ---------------------------------------------------------------------------
 
-  /** Whether a command is currently in-flight. */
-  get isBusy(): boolean {
-    return this._busy;
-  }
-
-  /** Timestamp (ms since epoch) of the last completed command. */
-  get lastCommand(): number {
-    return this.lastCommandTime;
+  /**
+   * Run a Wi-Fi scan from the device. Uses the SDK's `scanWifiList()`
+   * (which talks to the standard `prov-scan` protocomm endpoint).
+   */
+  async scanWifi(): Promise<ScannedNetwork[]> {
+    const device = this.requireDevice();
+    this.setBusy(true);
+    try {
+      const raw = await withTimeout<ESPWifiList[]>(
+        device.scanWifiList(),
+        DEFAULT_WIFI_SCAN_TIMEOUT_MS,
+        'scanWifi',
+      );
+      return raw.map((n) => ({
+        ssid: n.ssid,
+        rssi: n.rssi,
+        auth: authModeToString(n.auth),
+        bssid: n.bssid,
+        channel: n.channel,
+      }));
+    } finally {
+      this.setBusy(false);
+    }
   }
 
   /**
-   * Send a command to the device and await the response.
-   *
-   * Only one command may be pending at a time; calling while busy will reject
-   * immediately.
+   * Send credentials to the device and wait for STA-connect to complete.
+   * Wraps the SDK's atomic `provision()` call (which handles the
+   * `prov-config` exchange + waits for the device's STA result).
    */
-  sendCommand<T>(
-    cmd: CommandName,
-    params?: Record<string, unknown>,
+  async provision(
+    ssid: string,
+    password: string,
     timeoutMs?: number,
-  ): Promise<T> {
-    if (this._busy) {
-      return Promise.reject(new Error('Command already in progress'));
-    }
-
+  ): Promise<ProvisionResult> {
+    const device = this.requireDevice();
     this.setBusy(true);
-    this.pendingCommand = cmd;
-
-    return new Promise<T>((resolve, reject) => {
-      this.pendingResolve = resolve as (value: unknown) => void;
-      this.pendingReject = reject;
-
-      // Build the command envelope.
-      const envelope: Record<string, unknown> = { cmd };
-      if (params) {
-        envelope.params = params;
-      }
-
-      const ms = this.resolveTimeout(cmd, timeoutMs);
-
-      // Start the timeout timer before writing so that slow writes are covered.
-      this.timeoutTimer = setTimeout(() => {
-        this.timeoutTimer = null;
-        const error = new Error(
-          `Command '${cmd}' timed out after ${ms}ms`,
-        );
-        log.warn(error.message);
-        this.settlePending(null, error);
-      }, ms);
-
-      log.debug('sendCommand', cmd, params ?? '');
-      const nonce = this.commandNonce;
-      this.transport.writeCommand(JSON.stringify(envelope)).catch((err) => {
-        // Guard against stale .catch() handlers: if the command was already
-        // settled (e.g. by timeout) and a new command was started, this
-        // handler must not reject the new command's promise.
-        if (nonce !== this.commandNonce) {
-          log.debug('Ignoring stale writeCommand error (nonce mismatch)');
-          return;
-        }
-        log.error('writeCommand failed', err);
-        this.settlePending(
-          null,
-          err instanceof Error ? err : new Error(String(err)),
-        );
-      });
-    });
+    try {
+      const ms = timeoutMs ?? DEFAULT_PROVISION_TIMEOUT_MS;
+      const resp: { status: string } = await withTimeout(
+        device.provision(ssid, password),
+        ms,
+        'provision',
+      );
+      log.info('provision result:', resp.status);
+      return { ssid, status: resp.status };
+    } finally {
+      this.setBusy(false);
+    }
   }
 
   // ---------------------------------------------------------------------------
-  // Typed command helpers
+  // Public API — custom protocomm endpoints
   // ---------------------------------------------------------------------------
 
-  getStatus(): Promise<WifiStatus> {
-    return this.sendCommand<WifiStatus>('get_status');
+  /**
+   * Read the firmware/library version metadata from
+   * `esp-wifi-config-version`.
+   */
+  async getVersion(): Promise<DeviceVersionInfo> {
+    return this.readJsonEndpoint<DeviceVersionInfo>(PROV_ENDPOINT_VERSION);
   }
 
-  scan(): Promise<ScanResponseData> {
-    return this.sendCommand<ScanResponseData>('scan', undefined, 15000);
-  }
-
-  listNetworks(): Promise<ListNetworksResponseData> {
-    return this.sendCommand<ListNetworksResponseData>('list_networks');
-  }
-
-  addNetwork(params: AddNetworkParams): Promise<void> {
-    return this.sendCommand<void>(
-      'add_network',
-      params as unknown as Record<string, unknown>,
+  /**
+   * Read the device's enabled feature flags + storage limits from
+   * `esp-wifi-config-capabilities`.
+   */
+  async getCapabilities(): Promise<DeviceCapabilities> {
+    return this.readJsonEndpoint<DeviceCapabilities>(
+      PROV_ENDPOINT_CAPABILITIES,
     );
   }
 
-  delNetwork(ssid: string): Promise<void> {
-    return this.sendCommand<void>('del_network', { ssid });
-  }
-
-  connectWifi(ssid?: string): Promise<void> {
-    return this.sendCommand<void>(
-      'connect',
-      ssid ? { ssid } : undefined,
+  /**
+   * Read the device's effective provisioning policy (mode + retries).
+   */
+  async getNetworkPolicy(): Promise<DeviceNetworkPolicy> {
+    return this.readJsonEndpoint<DeviceNetworkPolicy>(
+      PROV_ENDPOINT_NETWORK_POLICY,
     );
   }
 
-  disconnectWifi(): Promise<void> {
-    return this.sendCommand<void>('disconnect');
+  // ---- Custom variable store ------------------------------------------------
+
+  /** List every saved variable. */
+  async listVars(): Promise<DeviceVariable[]> {
+    const resp = await this.callVars({ op: 'list' });
+    if ('error' in resp) throw new Error(resp.error);
+    if ('vars' in resp) {
+      return resp.vars.map((v) => ({ key: v.k, value: v.v }));
+    }
+    return [];
   }
 
-  getApStatus(): Promise<ApStatus> {
-    return this.sendCommand<ApStatus>('get_ap_status');
+  /** Read a single variable. Returns `null` if it doesn't exist. */
+  async getVar(key: string): Promise<DeviceVariable | null> {
+    const resp = await this.callVars({ op: 'get', key });
+    if ('error' in resp) {
+      if (resp.error === 'not_found') return null;
+      throw new Error(resp.error);
+    }
+    if ('value' in resp) {
+      return { key: resp.key, value: resp.value };
+    }
+    return null;
   }
 
-  startAp(params?: StartApParams): Promise<void> {
-    return this.sendCommand<void>(
-      'start_ap',
-      params as unknown as Record<string, unknown> | undefined,
-    );
+  /** Set (insert or update) a variable. */
+  async setVar(key: string, value: string): Promise<void> {
+    const resp = await this.callVars({ op: 'set', key, value });
+    if ('error' in resp) throw new Error(resp.error);
   }
 
-  stopAp(): Promise<void> {
-    return this.sendCommand<void>('stop_ap');
-  }
-
-  getVar(key: string): Promise<DeviceVariable> {
-    return this.sendCommand<DeviceVariable>('get_var', { key });
-  }
-
-  setVar(key: string, value: string): Promise<void> {
-    return this.sendCommand<void>('set_var', { key, value });
-  }
-
-  factoryReset(): Promise<void> {
-    return this.sendCommand<void>('factory_reset');
+  /** Delete a variable. */
+  async delVar(key: string): Promise<void> {
+    const resp = await this.callVars({ op: 'del', key });
+    if ('error' in resp) throw new Error(resp.error);
   }
 
   // ---------------------------------------------------------------------------
   // Lifecycle
   // ---------------------------------------------------------------------------
 
-  /**
-   * Tear down the protocol layer.
-   *
-   * Unsubscribes from transport events, rejects any in-flight command, and
-   * removes all listeners on this emitter.
-   */
   destroy(): void {
-    log.debug('destroy');
-    this.transport.off('response', this.handleResponse);
-
-    // Abandon any in-flight command without rejecting — this is a controlled
-    // teardown, not an error.  Calling reject() here would surface as an
-    // unhandled promise rejection when the caller (store action / UI) has
-    // already moved on.  Incrementing the nonce invalidates any outstanding
-    // writeCommand .catch() handler so it won't call settlePending later.
-    if (this.pendingCommand) {
-      log.debug('Abandoning pending command during destroy:', this.pendingCommand);
-    }
-    this.commandNonce++;
-    this.clearTimeout();
-    this.pendingResolve = null;
-    this.pendingReject = null;
-    this.pendingCommand = null;
-    this._busy = false;
-
     this.removeAllListeners();
   }
 
@@ -233,98 +247,94 @@ export class DeviceProtocol extends TypedEventEmitter<DeviceProtocolEvents> {
   // Internals
   // ---------------------------------------------------------------------------
 
-  /**
-   * Handle an incoming JSON response from the transport layer.
-   *
-   * Bound in the constructor so the reference is stable for event
-   * subscription/unsubscription.
-   */
-  private handleResponse(jsonText: string): void {
-    if (!this.pendingResolve || !this.pendingReject) {
-      log.warn('Received stray response with no pending command:', jsonText);
-      return;
+  private requireDevice() {
+    const device = this.transport.espDevice;
+    if (!device) {
+      throw new Error('No device connected');
     }
-
-    let response: ResponseEnvelope;
-    try {
-      response = JSON.parse(jsonText) as ResponseEnvelope;
-    } catch {
-      this.settlePending(null, new Error('Invalid JSON response'));
-      return;
-    }
-
-    if (response.status === 'ok' || response.status === 'success') {
-      this.settlePending((response as ResponseEnvelopeOk).data ?? {}, null);
-    } else {
-      const errResp = response as ResponseEnvelopeError;
-      const msg = errResp.error || errResp.message || 'Command failed';
-      const error = new Error(msg);
-      this.settlePending(null, error);
-    }
-  }
-
-  /**
-   * Resolve or reject the pending command promise and reset bookkeeping.
-   *
-   * Exactly one of `data` or `error` should be non-null.
-   */
-  private settlePending(data: unknown, error: Error | null): void {
-    const resolve = this.pendingResolve;
-    const reject = this.pendingReject;
-    const cmd = this.pendingCommand;
-
-    // Clear state before calling callbacks to allow re-entrant sendCommand.
-    // Increment the nonce so any stale .catch() handlers are invalidated.
-    this.commandNonce++;
-    this.clearTimeout();
-    this.pendingResolve = null;
-    this.pendingReject = null;
-    this.pendingCommand = null;
-    this.lastCommandTime = Date.now();
-    this.setBusy(false);
-
-    if (error) {
-      log.error('Command failed:', cmd, error.message);
-      if (cmd) {
-        this.emit('commandError', error, cmd);
-      }
-      reject?.(error);
-    } else {
-      log.debug('Command succeeded:', cmd);
-      resolve?.(data);
-    }
+    return device;
   }
 
   private setBusy(busy: boolean): void {
-    if (this._busy !== busy) {
-      this._busy = busy;
-      this.emit('busyChanged', busy);
+    if (busy) {
+      this.inFlight++;
+    } else {
+      this.inFlight = Math.max(0, this.inFlight - 1);
     }
+    this.emit('busyChanged', this.inFlight > 0);
+  }
+
+  private resolveTimeout(endpoint: string): number {
+    return (
+      this.config.endpointTimeouts?.[endpoint] ?? this.config.defaultTimeoutMs
+    );
   }
 
   /**
-   * Determine the effective timeout for a given command.
-   *
-   * Priority: explicit `timeoutMs` arg > per-command config override >
-   * per-command constant > global config default.
+   * Call a custom protocomm endpoint with a JSON request and parse a JSON
+   * response. The SDK's `sendData()` takes/returns base64 strings — we
+   * encode the request body and decode the response.
    */
-  private resolveTimeout(cmd: CommandName, explicit?: number): number {
-    if (explicit !== undefined) {
-      return explicit;
+  private async sendJson<TRes>(
+    endpoint: string,
+    body: unknown,
+  ): Promise<TRes> {
+    const device = this.requireDevice();
+    const ms = this.resolveTimeout(endpoint);
+    const requestStr = body === undefined ? '' : JSON.stringify(body);
+    const requestB64 = Buffer.from(requestStr, 'utf-8').toString('base64');
+
+    this.setBusy(true);
+    try {
+      const responseB64: string = await withTimeout(
+        device.sendData(endpoint, requestB64),
+        ms,
+        endpoint,
+      );
+
+      // Some native bridges return the raw UTF-8 string instead of base64.
+      // Try base64-decode first; fall back to using the string as-is.
+      let responseStr: string;
+      try {
+        responseStr = Buffer.from(responseB64, 'base64').toString('utf-8');
+        // Heuristic: if the decoded body is empty but the input wasn't, the
+        // SDK probably already gave us the decoded string.
+        if (!responseStr && responseB64) {
+          responseStr = responseB64;
+        }
+      } catch {
+        responseStr = responseB64;
+      }
+
+      if (!responseStr) {
+        throw new Error(`Empty response from ${endpoint}`);
+      }
+
+      try {
+        return JSON.parse(responseStr) as TRes;
+      } catch (err) {
+        throw new Error(
+          `Invalid JSON response from ${endpoint}: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      }
+    } catch (err) {
+      const error = err instanceof Error ? err : new Error(String(err));
+      log.warn(`Endpoint ${endpoint} failed:`, error.message);
+      this.emit('endpointError', error, endpoint);
+      throw error;
+    } finally {
+      this.setBusy(false);
     }
-    if (this.config.commandTimeouts?.[cmd] !== undefined) {
-      return this.config.commandTimeouts[cmd]!;
-    }
-    if (COMMAND_TIMEOUTS[cmd] !== undefined) {
-      return COMMAND_TIMEOUTS[cmd]!;
-    }
-    return this.config.defaultTimeoutMs;
   }
 
-  private clearTimeout(): void {
-    if (this.timeoutTimer !== null) {
-      clearTimeout(this.timeoutTimer);
-      this.timeoutTimer = null;
-    }
+  /** Convenience: GET-style call that sends an empty body and parses JSON. */
+  private readJsonEndpoint<T>(endpoint: string): Promise<T> {
+    return this.sendJson<T>(endpoint, undefined);
+  }
+
+  private callVars(req: VarsRequest): Promise<VarsResponse> {
+    return this.sendJson<VarsResponse>(PROV_ENDPOINT_VARS, req);
   }
 }

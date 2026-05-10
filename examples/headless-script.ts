@@ -1,8 +1,8 @@
 /**
- * examples/headless-script.ts — non-React provisioning.
+ * examples/headless-script.ts — non-React provisioning (v2).
  *
- * Pure TypeScript using BleTransport + DeviceProtocol + ConnectionPoller.
- * No store, no manager, no React. Useful for tests, CLI tools, automation.
+ * Pure TypeScript using BleTransport + DeviceProtocol. No store, no
+ * manager, no React. Useful for tests, CLI tools, and automation.
  *
  * Usage:
  *   npx ts-node examples/headless-script.ts MyWiFi MyPassword
@@ -11,123 +11,84 @@
 import {
   BleLibraryError,
   BleTransport,
-  ConnectionPoller,
   DeviceProtocol,
 } from 'esp-wifi-config-react-native';
 import type {
   DiscoveredDevice,
-  WifiStatus,
+  ProvisionResult,
 } from 'esp-wifi-config-react-native';
 
-const DEVICE_PREFIXES = ['MyDevice-'];
+const DEVICE_PREFIXES = ['PROV_'];
 const SCAN_TIMEOUT_MS = 10_000;
-const POLL_TIMEOUT_MS = 30_000;
+const PROVISION_TIMEOUT_MS = 60_000;
 
 async function provisionFirstFound(ssid: string, password: string) {
   const transport = new BleTransport({
     deviceNamePrefix: DEVICE_PREFIXES,
     scanTimeoutMs: SCAN_TIMEOUT_MS,
+    security: 1,
+    proofOfPossession: 'abcd1234', // override per device for production
   });
   const protocol = new DeviceProtocol(transport);
-  const poller = new ConnectionPoller(protocol);
 
+  const discovered: DiscoveredDevice[] = [];
+  transport.on('deviceDiscovered', (d) => {
+    console.log('Discovered:', d.name);
+    discovered.push(d);
+  });
+
+  console.log('Scanning…');
+  await transport.startScan();
+  if (discovered.length === 0) {
+    throw new Error('No devices found matching prefix');
+  }
+
+  const target = discovered[0];
+  console.log(`Connecting to ${target.name}…`);
   try {
-    // Step 1: scan for the first matching device.
-    console.log('Scanning…');
-    const device = await firstDeviceFound(transport);
-    transport.stopScan();
-    console.log(`Found: ${device.name} (${device.id}, ${device.rssi}dBm)`);
-
-    // Step 2: connect.
-    const info = await transport.connect(device.id);
-    console.log(`Connected (MTU ${info.mtu}).`);
-
-    // Step 3: provision.
-    console.log(`Adding network "${ssid}"…`);
-    await protocol.addNetwork({ ssid, password, priority: 10 });
-    await protocol.connectWifi(ssid);
-
-    // Step 4: poll until connected/failed/timeout.
-    console.log('Waiting for join…');
-    const status = await waitForJoin(poller);
-    console.log(`Joined! IP=${status.ip} RSSI=${status.rssi}dBm`);
+    await transport.connect(target.id);
   } catch (err) {
     if (err instanceof BleLibraryError) {
-      console.error(`BLE error [${err.code}]: ${err.message}`);
+      console.error(`BLE error (${err.code}):`, err.message);
     } else {
-      console.error('Failed:', err);
+      console.error('Connect failed:', err);
     }
-    process.exit(1);
-  } finally {
-    await transport.disconnect().catch(() => {});
-    poller.destroy();
-    await transport.destroy();
+    return;
   }
-}
 
-function firstDeviceFound(transport: BleTransport): Promise<DiscoveredDevice> {
-  return new Promise((resolve, reject) => {
-    const cleanup = () => {
-      offDiscovered();
-      offError();
-      offCompleted();
-    };
-    const offDiscovered = transport.on('deviceDiscovered', (d) => {
-      cleanup();
-      resolve(d);
-    });
-    const offError = transport.on('error', (err) => {
-      cleanup();
-      reject(err);
-    });
-    const offCompleted = transport.on('scanCompleted', (info) => {
-      if (info.matched === 0) {
-        cleanup();
-        reject(
-          new Error(
-            `No matching devices found (saw ${info.total} total). ` +
-              `Sample names: ${info.sampleNames.join(', ') || '(none)'}`,
-          ),
-        );
-      }
-    });
-
-    transport.startScan().catch(reject);
-  });
-}
-
-function waitForJoin(poller: ConnectionPoller): Promise<WifiStatus> {
-  return new Promise((resolve, reject) => {
-    const cleanup = () => {
-      offSucceeded();
-      offFailed();
-      offTimeout();
-    };
-    const offSucceeded = poller.on('connectionSucceeded', (status) => {
-      cleanup();
-      resolve(status);
-    });
-    const offFailed = poller.on('connectionFailed', () => {
-      cleanup();
-      reject(new Error('WiFi join failed (bad password or AP unreachable)'));
-    });
-    const offTimeout = poller.on('connectionTimedOut', () => {
-      cleanup();
-      reject(new Error('WiFi join timed out'));
-    });
-    poller.startPolling(POLL_TIMEOUT_MS, 2000);
-  });
-}
-
-// ---------------------------------------------------------------------------
-// CLI entry
-// ---------------------------------------------------------------------------
-
-if (require.main === module) {
-  const [ssid, password] = process.argv.slice(2);
-  if (!ssid || !password) {
-    console.error('Usage: headless-script.ts <ssid> <password>');
-    process.exit(2);
+  console.log('Reading device version…');
+  try {
+    const version = await protocol.getVersion();
+    console.log('  Library:', version.lib);
+    console.log('  IDF:', version.idf);
+    console.log('  Firmware:', version.fw_version ?? version.app);
+  } catch (err) {
+    console.warn('Version read failed (continuing):', err);
   }
-  void provisionFirstFound(ssid, password);
+
+  console.log(`Provisioning ${ssid}…`);
+  let result: ProvisionResult;
+  try {
+    result = await protocol.provision(ssid, password, PROVISION_TIMEOUT_MS);
+  } catch (err) {
+    console.error('Provision failed:', err);
+    await transport.disconnect();
+    return;
+  }
+  console.log('Provision status:', result.status);
+
+  await transport.disconnect();
+  console.log('Done.');
 }
+
+const [, , ssidArg, passwordArg] = process.argv;
+if (!ssidArg || !passwordArg) {
+  console.error(
+    'Usage: ts-node examples/headless-script.ts <ssid> <password>',
+  );
+  process.exit(1);
+}
+provisionFirstFound(ssidArg, passwordArg).catch((err) => {
+  console.error('Fatal:', err);
+  process.exit(1);
+});

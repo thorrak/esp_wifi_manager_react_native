@@ -2,8 +2,6 @@
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import type { ProvisioningTheme } from '../types';
 import { useProvisioning } from '../hooks/useProvisioning';
-import { SignalIcon } from '../components/SignalIcon';
-import { StatusBadge } from '../components/StatusBadge';
 
 const DEFAULT_COLORS = {
   primary: '#2563EB',
@@ -29,19 +27,18 @@ export function SuccessScreen({ theme, onComplete }: SuccessScreenProps) {
 
   const {
     lastResult,
-    wifiSsid,
-    wifiIp,
-    wifiRssi,
-    wifiQuality,
-    wifiState,
+    lastProvisionResult,
+    device,
     goToManage,
     cancel,
   } = useProvisioning();
 
-  // Prefer the latched lastResult — wifiSsid/wifiIp may be cleared if the
-  // device dropped its BLE GATT after a successful provision.
-  const ssid = lastResult?.ssid || wifiSsid;
-  const ip = lastResult?.ip || wifiIp;
+  // The SDK's provision() doesn't return the device IP — we surface the
+  // SSID and the SDK status string ("success", typically) instead. Apps
+  // that need the IP can fetch it over Wi-Fi after provisioning lands.
+  const ssid = lastResult?.ssid || lastProvisionResult?.ssid;
+  const status = lastProvisionResult?.status ?? lastResult?.provisionStatus;
+  const deviceName = lastResult?.deviceName ?? device?.name;
 
   const handleDone = () => {
     if (onComplete) onComplete();
@@ -78,7 +75,9 @@ export function SuccessScreen({ theme, onComplete }: SuccessScreenProps) {
             <Text style={[styles.detailLabel, { color: c.textSecondary }]}>
               Status
             </Text>
-            <StatusBadge state={wifiState} theme={theme} />
+            <Text style={[styles.detailValue, { color: c.success }]}>
+              {status ?? 'Provisioned'}
+            </Text>
           </View>
 
           <View style={[styles.divider, { backgroundColor: c.border }]} />
@@ -92,37 +91,21 @@ export function SuccessScreen({ theme, onComplete }: SuccessScreenProps) {
             </Text>
           </View>
 
-          <View style={[styles.divider, { backgroundColor: c.border }]} />
-
-          <View style={styles.detailRow}>
-            <Text style={[styles.detailLabel, { color: c.textSecondary }]}>
-              IP Address
-            </Text>
-            <Text
-              style={[
-                styles.detailValue,
-                { color: c.text, fontFamily: 'monospace' },
-              ]}
-            >
-              {ip}
-            </Text>
-          </View>
-
-          <View style={[styles.divider, { backgroundColor: c.border }]} />
-
-          <View style={styles.detailRow}>
-            <Text style={[styles.detailLabel, { color: c.textSecondary }]}>
-              Signal
-            </Text>
-            <View style={styles.signalRow}>
-              <SignalIcon rssi={wifiRssi} size={20} theme={theme} />
-              <Text
-                style={[styles.qualityText, { color: c.textSecondary }]}
-              >
-                {Math.round(wifiQuality)}%
-              </Text>
-            </View>
-          </View>
+          {deviceName ? (
+            <>
+              <View style={[styles.divider, { backgroundColor: c.border }]} />
+              <View style={styles.detailRow}>
+                <Text
+                  style={[styles.detailLabel, { color: c.textSecondary }]}
+                >
+                  Device
+                </Text>
+                <Text style={[styles.detailValue, { color: c.text }]}>
+                  {deviceName}
+                </Text>
+              </View>
+            </>
+          ) : null}
         </View>
 
         <TouchableOpacity
@@ -205,15 +188,6 @@ const styles = StyleSheet.create({
   detailValue: {
     fontSize: 14,
     fontWeight: '600',
-  },
-  signalRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  qualityText: {
-    fontSize: 14,
-    fontWeight: '500',
-    marginLeft: 8,
   },
   divider: {
     height: StyleSheet.hairlineWidth,

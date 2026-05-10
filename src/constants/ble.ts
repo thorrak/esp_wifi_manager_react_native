@@ -1,26 +1,34 @@
-/** Full 128-bit UUID for the WiFi Config BLE service */
-export const SERVICE_UUID = '0000FFE0-0000-1000-8000-00805F9B34FB';
+/**
+ * BLE-related constants for ESP-IDF Network Provisioning.
+ *
+ * The previous custom 0xFFE0 GATT service is gone — wifi_prov_mgr derives
+ * its BLE service UUID from a per-device prefix (default 16-byte UUID,
+ * configurable via CONFIG_WIFI_CFG_NETWORK_PROVISIONING_SERVICE_PREFIX).
+ * The Espressif native SDK handles the BLE I/O for us, so we no longer
+ * expose any GATT UUIDs from this library.
+ */
 
-/** Status characteristic - Read, Notify */
-export const STATUS_CHAR_UUID = '0000FFE1-0000-1000-8000-00805F9B34FB';
+/** Default BLE GAP-name prefix that wifi_prov_scheme_ble advertises with. */
+export const DEVICE_NAME_PREFIX = 'PROV_';
 
-/** Command characteristic - Write */
-export const COMMAND_CHAR_UUID = '0000FFE2-0000-1000-8000-00805F9B34FB';
-
-/** Response characteristic - Read, Notify */
-export const RESPONSE_CHAR_UUID = '0000FFE3-0000-1000-8000-00805F9B34FB';
-
-/** Default device name prefix for BLE scanning */
-export const DEVICE_NAME_PREFIX = 'ESP32-WiFi-';
-
-/** Minimum delay between GATT writes (ms) to avoid "operation in progress" errors */
-export const GATT_SETTLE_MS = 120;
-
-/** Default scan timeout (ms) */
+/** Default BLE scan timeout (ms). */
 export const DEFAULT_SCAN_TIMEOUT_MS = 10000;
 
-/** Default connection timeout (ms) */
-export const DEFAULT_CONNECTION_TIMEOUT_MS = 10000;
+/** Default per-call SDK operation timeout (ms). */
+export const DEFAULT_SDK_TIMEOUT_MS = 15000;
 
-/** Default MTU to request from the device */
-export const DEFAULT_REQUESTED_MTU = 517;
+/**
+ * Default proof-of-possession for Security 1.
+ *
+ * Matches the firmware's Kconfig default
+ * (CONFIG_WIFI_CFG_NETWORK_PROVISIONING_POP). Real devices should ship
+ * with a unique, per-device PoP — override at runtime via
+ * `ProvisioningConfig.security.proofOfPossession`.
+ */
+export const DEFAULT_POP = 'abcd1234';
+
+/**
+ * Default SRP6a username for Security 2 (matches firmware Kconfig
+ * default `CONFIG_WIFI_CFG_NETWORK_PROVISIONING_SECURITY2_USERNAME`).
+ */
+export const DEFAULT_SECURITY2_USERNAME = 'wificfg';

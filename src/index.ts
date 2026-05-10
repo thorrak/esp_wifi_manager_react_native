@@ -1,11 +1,15 @@
 // ===========================================================================
-// esp-wifi-config-react-native — public surface.
+// esp-wifi-config-react-native — public surface (v2).
 // ---------------------------------------------------------------------------
 // AI-agent guidance: when integrating, prefer the high-level surface
 // (`useProvisioning` + pre-built screens) unless you specifically need
 // raw service classes. Read the canonical step machine in
 // types/provisioning.ts → `ProvisioningStep`. The action verbs returned
 // from `useProvisioning()` map 1:1 to ProvisioningManager methods.
+//
+// v2 wraps Espressif's official iOS / Android provisioning SDK
+// (@orbital-systems/react-native-esp-idf-provisioning) instead of speaking
+// the deleted custom JSON-over-GATT protocol directly.
 // ===========================================================================
 
 // ── Types ──
@@ -18,30 +22,20 @@ export type {
   ScanCompletedInfo,
   BleTransportConfig,
   BleTransportEvents,
+  SecurityVersion,
   // Protocol
-  CommandName,
-  AddNetworkParams,
-  DelNetworkParams,
-  ConnectParams,
-  StartApParams,
-  GetVarParams,
-  SetVarParams,
-  CommandEnvelope,
-  ResponseEnvelope,
-  ResponseEnvelopeOk,
-  ResponseEnvelopeError,
+  DeviceVersionInfo,
+  DeviceCapabilities,
+  DeviceVariable,
+  DeviceNetworkPolicy,
+  VarsRequest,
+  VarsResponse,
   DeviceProtocolConfig,
   DeviceProtocolEvents,
   // WiFi
-  WifiConnectionState,
   WifiAuthType,
-  WifiStatus,
   ScannedNetwork,
-  SavedNetwork,
-  ScanResponseData,
-  ListNetworksResponseData,
-  ApStatus,
-  DeviceVariable,
+  ProvisionResult,
   // Provisioning
   ProvisioningStep,
   DeviceConnection,
@@ -59,13 +53,21 @@ export { BleLibraryError } from './types/ble';
 
 // ── Constants ──
 export {
-  SERVICE_UUID,
-  STATUS_CHAR_UUID,
-  COMMAND_CHAR_UUID,
-  RESPONSE_CHAR_UUID,
   DEVICE_NAME_PREFIX,
-  GATT_SETTLE_MS,
-} from './constants';
+  DEFAULT_POP,
+  DEFAULT_SECURITY2_USERNAME,
+  DEFAULT_SCAN_TIMEOUT_MS,
+  DEFAULT_SDK_TIMEOUT_MS,
+} from './constants/ble';
+export {
+  PROV_ENDPOINT_VERSION,
+  PROV_ENDPOINT_CAPABILITIES,
+  PROV_ENDPOINT_VARS,
+  PROV_ENDPOINT_NETWORK_POLICY,
+  DEFAULT_ENDPOINT_TIMEOUT_MS,
+  DEFAULT_WIFI_SCAN_TIMEOUT_MS,
+  DEFAULT_PROVISION_TIMEOUT_MS,
+} from './constants/protocol';
 export {
   PROVISIONING_STEP_ORDER,
   STEP_NUMBERS,
@@ -80,15 +82,12 @@ export type { LogLevel, BlePermissionResult } from './utils';
 // ── Service Classes (for headless / advanced use) ──
 export { BleTransport } from './services/BleTransport';
 export { DeviceProtocol } from './services/DeviceProtocol';
-export { ConnectionPoller } from './services/ConnectionPoller';
-export type { ConnectionPollerEvents } from './services/ConnectionPoller';
 export { ProvisioningManager } from './services/ProvisioningManager';
 
 // ── Service Factory (singleton access) ──
 export {
   getTransport,
   getProtocol,
-  getPoller,
   getManager,
   initializeServices,
   destroyServices,
@@ -102,10 +101,7 @@ export type { ProvisioningStoreState, ProvisioningStoreActions } from './store';
 export { useProvisioning } from './hooks/useProvisioning';
 export { useDeviceScanner } from './hooks/useDeviceScanner';
 export { useBleConnection } from './hooks/useBleConnection';
-export { useWifiStatus } from './hooks/useWifiStatus';
 export { useDeviceProtocol } from './hooks/useDeviceProtocol';
-export { useSavedNetworks } from './hooks/useSavedNetworks';
-export { useAccessPoint } from './hooks/useAccessPoint';
 export { useDeviceVariables } from './hooks/useDeviceVariables';
 
 // ── Pre-Built UI Components ──
@@ -113,15 +109,11 @@ export {
   ErrorBanner,
   LoadingSpinner,
   SignalIcon,
-  StatusBadge,
   StepIndicator,
   PasswordInput,
   ConfirmDialog,
   NetworkList,
   NetworkListItem,
-  SavedNetworkList,
-  SavedNetworkItem,
-  ApSettings,
   VariableEditor,
   DeviceListItem,
 } from './components';
@@ -139,7 +131,5 @@ export {
 } from './screens';
 
 // ── Navigation Utilities ──
-// Note: ProvisioningNavigator is exported from 'esp-wifi-config-react-native/navigation'
-// to avoid requiring @react-navigation peer deps for hooks-only users.
 export { SCREEN_NAMES, stepToScreenName } from './navigation/navigationConfig';
 export type { ScreenName } from './navigation/navigationConfig';

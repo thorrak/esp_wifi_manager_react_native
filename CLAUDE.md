@@ -4,7 +4,13 @@ This file is the canonical entry point for AI agents (Claude Code, etc.) integra
 
 ## What this library does
 
-`esp-wifi-config-react-native` is a React Native library that lets a mobile app provision WiFi credentials onto an ESP32 device over BLE. The device must be running [esp_wifi_config](https://github.com/thorrak/esp_wifi_config) firmware and advertising the configurable BLE GATT service.
+`esp-wifi-config-react-native` is a React Native library that lets a mobile app provision Wi-Fi credentials onto an ESP32 device over BLE using ESP-IDF's official Wi-Fi/Network Provisioning protocol. The device must be running [esp_wifi_config](https://github.com/thorrak/esp_wifi_config) **0.1.0+** firmware with `CONFIG_WIFI_CFG_ENABLE_NETWORK_PROVISIONING=y`.
+
+> **Library version 2.x is a breaking rewrite.** v1 spoke a custom
+> JSON-over-GATT 0xFFE0 protocol that no longer exists in firmware. v2
+> wraps Espressif's native iOS/Android provisioning SDKs via
+> [`@orbital-systems/react-native-esp-idf-provisioning`](https://www.npmjs.com/package/@orbital-systems/react-native-esp-idf-provisioning).
+> See [CHANGELOG.md](./CHANGELOG.md) for the full migration list.
 
 Three integration paths, in order of decreasing abstraction:
 
@@ -12,16 +18,16 @@ Three integration paths, in order of decreasing abstraction:
 |------|------|------|
 | Pre-built `ProvisioningNavigator` | You want a working wizard with zero UI work | `import { ProvisioningNavigator } from 'esp-wifi-config-react-native/navigation'` |
 | `useProvisioning` hook + custom UI | You want full control over screens but the same state machine | `import { useProvisioning } from 'esp-wifi-config-react-native'` |
-| Service classes (`BleTransport`, `DeviceProtocol`, `ConnectionPoller`, `ProvisioningManager`) | Headless / non-React / advanced | `import { BleTransport, DeviceProtocol } from 'esp-wifi-config-react-native'` |
+| Service classes (`BleTransport`, `DeviceProtocol`, `ProvisioningManager`) | Headless / non-React / advanced | `import { BleTransport, DeviceProtocol } from 'esp-wifi-config-react-native'` |
 
-## Mental model — four layers
+## Mental model — three layers
 
 ```
-BleTransport   ── BLE I/O: scanning, connecting, GATT writes, JSON reassembly
+BleTransport   ── thin wrapper around the native ESP-IDF SDK:
+                  searchESPDevices / connect / disconnect
      ↓
-DeviceProtocol ── JSON command/response envelope, typed helpers, timeouts
-     ↓
-ConnectionPoller ── periodic get_status, success/failure/timeout detection
+DeviceProtocol ── SDK provision() + scanWifiList() + JSON-over-base64
+                  for the four custom protocomm endpoints
      ↓
 ProvisioningManager ── wizard step machine, error wrapping, onConnected hook
      ↓
@@ -32,7 +38,7 @@ React hooks ── thin selectors + per-instance loading/error trackers
 Pre-built screens / your UI
 ```
 
-Each layer only depends on the one below it. The store IS the canonical reactive state.
+Each layer only depends on the one below it. The store IS the canonical reactive state. The `ConnectionPoller` from v1 is gone — the SDK's atomic `provision()` resolves on STA-connect success or rejects on failure.
 
 ## The step machine — single source of truth
 
@@ -64,8 +70,8 @@ Source: `src/types/provisioning.ts` → `ProvisioningStep`. Numbered steps via `
 | `proceedFromConfigure()` | configuring → scanningWifi → chooseNetwork |
 | `chooseNetwork(network)` | chooseNetwork → enterCredentials |
 | `backToNetworks()` | enterCredentials → chooseNetwork |
-| `submitPassword(pw)` | enterCredentials → joiningWifi (sends add_network + connect, starts poller) |
-| `retryJoin()` | re-issue connect from joiningWifi |
+| `submitPassword(pw)` | enterCredentials → joiningWifi (calls SDK provision(), awaits STA-connect) |
+| `retryJoin(pw?)` | re-run provision() with the same network; bounces back to enterCredentials if no password is supplied |
 | `pickDifferentNetwork()` | joiningWifi → chooseNetwork (deletes the failed network) |
 | `pickDifferentDevice()` | any step → scanBle (disconnects, scans again) |
 | `cancel()` | any step → welcome (full reset, preserves `lastResult`) |
@@ -80,10 +86,10 @@ Source: `src/types/provisioning.ts` → `ProvisioningStep`. Numbered steps via `
   stepNumber,         // 1..5 | null
   error,              // ProvisioningError | null  ← unified envelope
   lastResult,         // ProvisioningResult | null  ← survives cancel()
-  device,             // DeviceConnection | null  ← discriminated union
+  lastProvisionResult,// ProvisionResult | null    ← raw SDK response
+  device,             // DeviceConnection | null   ← discriminated union
   scannedNetworks,    // ScannedNetwork[]
   selectedNetwork,    // ScannedNetwork | null
-  wifiState, wifiSsid, wifiIp, wifiRssi, wifiQuality, polling,
   // …action verbs
 }
 ```
@@ -92,8 +98,8 @@ Source: `src/types/provisioning.ts` → `ProvisioningStep`. Numbered steps via `
 
 ```ts
 type ProvisioningError = {
-  source: 'ble' | 'protocol' | 'poller' | 'flow';
-  code?: string;        // e.g. 'unauthorized', 'connection_failed'
+  source: 'ble' | 'protocol' | 'provision' | 'flow';
+  code?: string;        // e.g. 'unauthorized', 'provision_failed'
   message: string;      // for direct display
   recoverable: boolean; // true → user can retry from same step
 };
@@ -118,9 +124,11 @@ type DeviceConnection =
 
 2. **Don't read multiple error fields.** There is one: `error`. Sources are tagged via `error.source`. The old `bleError` / `pollError` / `provisioningError` fields are gone.
 
-3. **Don't use `lastResult` for in-flow status.** It only fills in on `success`. While the wizard is running, read `wifiSsid`/`wifiIp`/`device.name` directly.
+3. **Don't use `lastResult` for in-flow status.** It only fills in on `success`. While the wizard is running, read `device.name` for the device and `selectedNetwork` for the WiFi target. There is no live `wifiSsid`/`wifiIp` stream from the SDK; the IP is not surfaced over BLE — fetch it via the device's HTTP API once it's on the network.
 
 4. **Don't gate effects on a global `busy` flag.** There isn't one. Each hook (`useDeviceVariables`, `useDeviceProtocol`) tracks its own `loading` per-instance. Use that.
+
+   Calls to `DeviceProtocol`'s custom protocomm endpoints (`getVar`, `setVar`, etc.) only work while the BLE protocomm session is alive — typically between `connect()` and the device dropping BLE after a successful provision. Schedule them inside `flow.onConnected` or before `submitPassword()`.
 
 5. **Don't throw from `flow.onConnected` and hope the user notices.** The manager parks on `configuring` with a `flow`-source error. Render that error on your configure screen; offer a retry that calls `proceedFromConfigure()` (skip the failure) or `pickDifferentDevice()` (start over).
 
@@ -165,17 +173,23 @@ Handles iOS (no-op, granted by Info.plist + first-use OS dialog) and Android 12+
 ```ts
 import { BleTransport, DeviceProtocol } from 'esp-wifi-config-react-native';
 
-const transport = new BleTransport({ deviceNamePrefix: 'MyDevice-' });
+const transport = new BleTransport({
+  deviceNamePrefix: 'PROV_',
+  security: 1,
+  proofOfPossession: 'abcd1234',
+});
 const protocol = new DeviceProtocol(transport);
 
-transport.on('deviceDiscovered', async (d) => {
-  transport.stopScan();
-  await transport.connect(d.id);
-  await protocol.addNetwork({ ssid: 'X', password: 'Y' });
-  await protocol.connectWifi('X');
-});
+const targets: { id: string }[] = [];
+transport.on('deviceDiscovered', (d) => targets.push(d));
 
-await transport.startScan();
+await transport.startScan();          // resolves once SDK scan completes
+if (targets.length === 0) throw new Error('no devices');
+
+await transport.connect(targets[0].id);
+await protocol.setVar('mdns_name', 'my-device');
+const result = await protocol.provision('MyWifi', 'password123');
+console.log(result.status);
 ```
 
 No React, no store, no manager. Useful for tests or background tasks.
@@ -184,13 +198,21 @@ No React, no store, no manager. Useful for tests or background tasks.
 
 ```ts
 type ProvisioningConfig = {
-  ble?: { deviceNamePrefix?: string | string[]; scanTimeoutMs?; … };
-  protocol?: { defaultTimeoutMs?; commandTimeouts? };
-  poller?: { intervalMs?: number; timeoutMs?: number };
+  ble?: {
+    deviceNamePrefix?: string | string[];   // default 'PROV_'
+    scanTimeoutMs?: number;                  // default 10000
+    security?: 0 | 1 | 2;                    // default 1
+    proofOfPossession?: string;              // default 'abcd1234'
+    username?: string;                       // sec2 only, default 'wificfg'
+  };
+  protocol?: {
+    defaultTimeoutMs?: number;               // default 8000
+    endpointTimeouts?: Record<string, number>;
+  };
   flow?: {
     onConnected?: (ctx: { protocol; transport }) => Promise<void>;
-    defaultNetworkPriority?: number;
     autoConnectOpenNetworks?: boolean;
+    provisionTimeoutMs?: number;             // default 60000
   };
 };
 ```

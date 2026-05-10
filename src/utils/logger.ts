@@ -8,9 +8,12 @@ const LOG_LEVELS: Record<LogLevel, number> = {
   none: 4,
 };
 
-let currentLevel: LogLevel = __DEV__ ? 'debug' : 'warn';
+declare const __DEV__: boolean | undefined;
 
-declare const __DEV__: boolean;
+// Jest / Node test runs don't set the React Native `__DEV__` global, so
+// guard the access. Defaults to 'warn' in any non-RN context.
+let currentLevel: LogLevel =
+  typeof __DEV__ !== 'undefined' && __DEV__ ? 'debug' : 'warn';
 
 export function setLogLevel(level: LogLevel): void {
   currentLevel = level;

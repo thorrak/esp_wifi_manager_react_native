@@ -1,5 +1,3 @@
-export type WifiConnectionState = 'connected' | 'connecting' | 'disconnected';
-
 export type WifiAuthType =
   | 'OPEN'
   | 'WEP'
@@ -7,51 +5,28 @@ export type WifiAuthType =
   | 'WPA2'
   | 'WPA/WPA2'
   | 'WPA3'
+  | 'WPA2/WPA3'
+  | 'WPA2_ENTERPRISE'
   | 'UNKNOWN';
 
-export interface WifiStatus {
-  state: WifiConnectionState;
-  ssid: string;
-  rssi: number;
-  quality: number;
-  ip: string;
-  channel: number;
-  netmask: string;
-  gateway: string;
-  dns: string;
-  mac: string;
-  hostname: string;
-  uptime_ms: number;
-  ap_active: boolean;
-}
-
+/**
+ * One result from the SDK's `prov-scan` call. Mirrors what `ESPWifiList`
+ * carries plus a normalised `auth` string for the UI.
+ */
 export interface ScannedNetwork {
   ssid: string;
   rssi: number;
   auth: WifiAuthType;
+  bssid?: string;
+  channel?: number;
 }
 
-export interface SavedNetwork {
+/**
+ * Outcome of a successful `provision()` call. The SDK returns just
+ * `{ status: string }` — we surface that plus the SSID we sent so UIs
+ * have a stable place to read both.
+ */
+export interface ProvisionResult {
   ssid: string;
-  priority: number;
-}
-
-export interface ScanResponseData {
-  networks: ScannedNetwork[];
-}
-
-export interface ListNetworksResponseData {
-  networks: SavedNetwork[];
-}
-
-export interface ApStatus {
-  active: boolean;
-  ssid: string;
-  ip: string;
-  sta_count: number;
-}
-
-export interface DeviceVariable {
-  key: string;
-  value: string;
+  status: string;
 }

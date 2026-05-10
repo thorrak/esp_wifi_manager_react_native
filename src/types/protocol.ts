@@ -1,74 +1,90 @@
-export type CommandName =
-  | 'get_status'
-  | 'scan'
-  | 'list_networks'
-  | 'add_network'
-  | 'del_network'
-  | 'connect'
-  | 'disconnect'
-  | 'get_ap_status'
-  | 'start_ap'
-  | 'stop_ap'
-  | 'get_var'
-  | 'set_var'
-  | 'factory_reset';
+/**
+ * Protocol-layer types for the custom protocomm endpoints exposed by
+ * esp_wifi_config 0.1.0+.
+ *
+ * The library no longer sends raw JSON commands over GATT — credential
+ * exchange and the WiFi scan list are routed through the SDK's
+ * `provision()` / `scanWifiList()`. What remains here is the small set of
+ * library-specific protocomm endpoints used to expose higher-level state
+ * during the provisioning window.
+ */
 
-export interface AddNetworkParams {
-  ssid: string;
-  password?: string;
-  priority?: number;
+export interface DeviceVersionInfo {
+  lib?: string;
+  idf?: string;
+  app?: string;
+  fw_version?: string;
+  compile_time?: string;
+  chip?: string;
+  firmware_version?: string;
+  /** Catch-all for forward-compat fields. */
+  [key: string]: unknown;
 }
 
-export interface DelNetworkParams {
-  ssid: string;
+export interface DeviceCapabilities {
+  capabilities: string[];
+  max_networks?: number;
+  max_vars?: number;
+  /** Catch-all for forward-compat fields. */
+  [key: string]: unknown;
 }
 
-export interface ConnectParams {
-  ssid?: string;
-}
-
-export interface StartApParams {
-  ssid?: string;
-  password?: string;
-}
-
-export interface GetVarParams {
-  key: string;
-}
-
-export interface SetVarParams {
+export interface DeviceVariable {
   key: string;
   value: string;
 }
 
-export interface CommandEnvelope {
-  cmd: CommandName;
-  params?: Record<string, unknown>;
+export interface DeviceNetworkPolicy {
+  provisioning_mode?: string;
+  max_retry_per_network?: number;
+  retry_interval_ms?: number;
+  retry_max_interval_ms?: number;
+  auto_reconnect?: boolean;
+  max_reconnect_attempts?: number;
+  saved_networks?: number;
+  /** Catch-all for forward-compat fields. */
+  [key: string]: unknown;
 }
 
-export interface ResponseEnvelopeOk<T = Record<string, unknown>> {
-  status: 'ok' | 'success';
-  data: T;
+/** Vars endpoint request union. See firmware schema in esp_wifi_config_prov_ble.c. */
+export type VarsRequest =
+  | { op: 'list' }
+  | { op: 'get'; key: string }
+  | { op: 'set'; key: string; value: string }
+  | { op: 'del'; key: string };
+
+export interface VarsListResponse {
+  vars: Array<{ k: string; v: string }>;
 }
 
-export interface ResponseEnvelopeError {
-  status: 'error';
+export interface VarsGetResponse {
+  key: string;
+  value: string;
+}
+
+export interface VarsOkResponse {
+  ok: true;
+}
+
+export interface VarsErrorResponse {
   error: string;
-  message?: string;
+  ok?: false;
 }
 
-export type ResponseEnvelope<T = Record<string, unknown>> =
-  | ResponseEnvelopeOk<T>
-  | ResponseEnvelopeError;
+export type VarsResponse =
+  | VarsListResponse
+  | VarsGetResponse
+  | VarsOkResponse
+  | VarsErrorResponse;
 
 export interface DeviceProtocolEvents {
   busyChanged: (busy: boolean) => void;
-  commandError: (error: Error, command: CommandName) => void;
+  endpointError: (error: Error, endpoint: string) => void;
 }
 
 export interface DeviceProtocolConfig {
-  /** Default command timeout in ms. Default: 8000 */
+  /** Default per-endpoint timeout in ms. Default: 8000. */
   defaultTimeoutMs?: number;
-  /** Per-command timeout overrides */
-  commandTimeouts?: Partial<Record<CommandName, number>>;
+  /** Per-endpoint timeout overrides keyed by endpoint path. */
+  endpointTimeouts?: Record<string, number>;
 }

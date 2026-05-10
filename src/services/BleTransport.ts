@@ -1,62 +1,57 @@
 /**
  * BleTransport — Layer 1 of the ESP WiFi Config library.
  *
- * Wraps react-native-ble-plx to provide:
- *  - BLE scanning filtered by device name prefix
- *  - Connection with MTU negotiation and characteristic discovery
- *  - Write-with-response on the Command characteristic (with GATT settle delay)
- *  - Notification monitoring on Response and Status characteristics
- *  - Chunked JSON reassembly from notification fragments
- *  - Typed event emission for all transport-level events
+ * Wraps `@orbital-systems/react-native-esp-idf-provisioning`, which itself
+ * wraps Espressif's native iOS / Android provisioning SDKs. Provides:
+ *
+ *   - BLE scanning filtered by device-name prefix (`PROV_*` by default)
+ *   - Connection / session-init using the configured Security 1 / 2 PoP
+ *   - Reference holding for the active `ESPDevice` so DeviceProtocol /
+ *     ProvisioningManager can hand off scan / provision / sendData calls
+ *   - Typed event emission compatible with the v1 transport
+ *
+ * The native SDK does not stream individual discoveries — `searchESPDevices`
+ * resolves with the full list at the end of a scan cycle. We emit
+ * `deviceDiscovered` once per matched device when results land, then a
+ * single `scanCompleted`. This is a behaviour change from v1 (live
+ * discovery stream) but is what the underlying SDK supports.
  */
 
 import {
-  BleManager,
-  Device,
-  Characteristic,
-  Subscription,
-  BleError,
-  State,
-} from 'react-native-ble-plx';
+  ESPDevice,
+  ESPProvisionManager,
+  ESPSecurity,
+  ESPTransport,
+} from '@orbital-systems/react-native-esp-idf-provisioning';
 
 import type {
   BleConnectionState,
-  DiscoveredDevice,
   ConnectedDeviceInfo,
+  DiscoveredDevice,
   BleTransportEvents,
   BleTransportConfig,
+  SecurityVersion,
 } from '../types';
 
 import { BleLibraryError } from '../types/ble';
 
 import {
-  SERVICE_UUID,
-  STATUS_CHAR_UUID,
-  COMMAND_CHAR_UUID,
-  RESPONSE_CHAR_UUID,
   DEVICE_NAME_PREFIX,
-  GATT_SETTLE_MS,
   DEFAULT_SCAN_TIMEOUT_MS,
-  DEFAULT_CONNECTION_TIMEOUT_MS,
-  DEFAULT_REQUESTED_MTU,
+  DEFAULT_POP,
+  DEFAULT_SECURITY2_USERNAME,
 } from '../constants/ble';
 
-import {
-  TypedEventEmitter,
-  stringToBase64,
-  base64ToString,
-  createLogger,
-} from '../utils';
+import { TypedEventEmitter, createLogger } from '../utils';
 
 const log = createLogger('BleTransport');
 
-/** Resolved config with all defaults applied. */
 interface ResolvedConfig {
   deviceNamePrefixes: string[];
   scanTimeoutMs: number;
-  gattSettleMs: number;
-  connectionTimeoutMs: number;
-  requestedMtu: number;
+  security: SecurityVersion;
+  proofOfPossession: string;
+  username: string;
 }
 
 function normalizePrefixes(input?: string | string[]): string[] {
@@ -68,40 +63,31 @@ function resolveConfig(config?: BleTransportConfig): ResolvedConfig {
   return {
     deviceNamePrefixes: normalizePrefixes(config?.deviceNamePrefix),
     scanTimeoutMs: config?.scanTimeoutMs ?? DEFAULT_SCAN_TIMEOUT_MS,
-    gattSettleMs: config?.gattSettleMs ?? GATT_SETTLE_MS,
-    connectionTimeoutMs: config?.connectionTimeoutMs ?? DEFAULT_CONNECTION_TIMEOUT_MS,
-    requestedMtu: config?.requestedMtu ?? DEFAULT_REQUESTED_MTU,
+    security: config?.security ?? 1,
+    proofOfPossession: config?.proofOfPossession ?? DEFAULT_POP,
+    username: config?.username ?? DEFAULT_SECURITY2_USERNAME,
   };
 }
 
+function toEspSecurity(s: SecurityVersion): ESPSecurity {
+  switch (s) {
+    case 0:
+      return ESPSecurity.unsecure;
+    case 2:
+      return ESPSecurity.secure2;
+    case 1:
+    default:
+      return ESPSecurity.secure;
+  }
+}
+
 export class BleTransport extends TypedEventEmitter<BleTransportEvents> {
-  // ── Core BLE references ──────────────────────────────────────────────
-  private readonly bleManager: BleManager;
   private readonly config: ResolvedConfig;
 
-  // ── Connection state ─────────────────────────────────────────────────
   private _connectionState: BleConnectionState = 'disconnected';
-  private device: Device | null = null;
+  private _device: ESPDevice | null = null;
   private _connectedDeviceInfo: ConnectedDeviceInfo | null = null;
-
-  // ── Subscription handles ─────────────────────────────────────────────
-  private responseSubscription: Subscription | null = null;
-  private statusSubscription: Subscription | null = null;
-  private disconnectSubscription: Subscription | null = null;
-  private bleStateSubscription: Subscription | null = null;
   private scanTimeoutId: ReturnType<typeof setTimeout> | null = null;
-
-  // ── Write throttle ──────────────────────────────────────────────────
-  private lastWriteTime = 0;
-
-  // ── Chunked response reassembly buffers ──────────────────────────────
-  private responseBuffer = '';
-  private statusBuffer = '';
-
-  // ── Deduplication for scan results ───────────────────────────────────
-  private discoveredDeviceIds = new Set<string>();
-
-  // ── Teardown guard ────────────────────────────────────────────────────
   private _destroyed = false;
 
   // ────────────────────────────────────────────────────────────────────
@@ -111,18 +97,10 @@ export class BleTransport extends TypedEventEmitter<BleTransportEvents> {
   constructor(config?: BleTransportConfig) {
     super();
     this.config = resolveConfig(config);
-    this.bleManager = new BleManager();
-
-    // Monitor adapter state so we can react to Bluetooth being turned off.
-    this.bleStateSubscription = this.bleManager.onStateChange((state: State) => {
-      log.debug('BLE adapter state changed:', state);
-      if (state === State.PoweredOff && this._connectionState !== 'disconnected') {
-        log.warn('Bluetooth powered off — cleaning up connection');
-        this.handleUnexpectedDisconnect();
-      }
-    }, true);
-
-    log.info('BleTransport created', { config: this.config });
+    log.info('BleTransport created', {
+      prefixes: this.config.deviceNamePrefixes,
+      security: this.config.security,
+    });
   }
 
   // ────────────────────────────────────────────────────────────────────
@@ -141,265 +119,192 @@ export class BleTransport extends TypedEventEmitter<BleTransportEvents> {
     return this._connectionState;
   }
 
+  /**
+   * The active `ESPDevice` reference, if connected.
+   *
+   * Exposed (unstable) so the protocol / manager layers can call
+   * `provision()` / `scanWifiList()` / `sendData()` on it. Most
+   * application code should not touch this directly.
+   */
+  get espDevice(): ESPDevice | null {
+    return this._device;
+  }
+
+  /** Resolved configuration (after defaults applied). */
+  get resolvedConfig(): Readonly<ResolvedConfig> {
+    return this.config;
+  }
+
   // ────────────────────────────────────────────────────────────────────
   // Scanning
   // ────────────────────────────────────────────────────────────────────
 
+  /**
+   * Start a BLE scan for devices matching any configured prefix. The
+   * native SDK does not stream individual discoveries — once the scan
+   * resolves, every matched device is emitted as a separate
+   * `deviceDiscovered` event followed by a single `scanCompleted`.
+   *
+   * The scan is implicitly bounded by `scanTimeoutMs`; we race the SDK
+   * call against a setTimeout that calls `stopScan()` if the SDK doesn't
+   * return on its own.
+   */
   async startScan(): Promise<void> {
     if (this._connectionState === 'scanning') {
       log.warn('Scan already in progress');
       return;
     }
-    if (this._connectionState === 'connected' || this._connectionState === 'connecting') {
+    if (
+      this._connectionState === 'connected' ||
+      this._connectionState === 'connecting'
+    ) {
       log.warn('Cannot scan while connected or connecting');
       return;
     }
 
-    // Ensure the BLE adapter is ready before starting a scan.
-    const ready = await this.waitForPoweredOn();
-    if (!ready) return;
-
     log.info('Starting BLE scan', { prefixes: this.config.deviceNamePrefixes });
-    this.discoveredDeviceIds.clear();
     this.setConnectionState('scanning');
 
-    const allSeenIds = new Set<string>();
-    const seenNames = new Map<string, string | null>();
+    // Schedule a hard cap so the UI never hangs on a stuck scan.
+    this.scanTimeoutId = setTimeout(() => {
+      log.warn(`Scan timeout after ${this.config.scanTimeoutMs}ms — cancelling`);
+      try {
+        ESPProvisionManager.stopESPDevicesSearch();
+      } catch {
+        // SDK may have already finished.
+      }
+    }, this.config.scanTimeoutMs);
 
-    this.bleManager.startDeviceScan(null, { allowDuplicates: true }, (error: BleError | null, device: Device | null) => {
-      if (error) {
-        // stopDeviceScan() on Android can fire the callback one last time
-        // with "Operation was cancelled" — this is expected, not an error.
-        if (/cancelled|canceled/i.test(error.message)) {
-          log.debug('Scan cancelled (expected):', error.message);
-          return;
+    const matched = new Map<string, ESPDevice>();
+
+    try {
+      // Run one searchESPDevices() call per prefix. The SDK API only
+      // accepts a single prefix per call, so we serialise.
+      for (const prefix of this.config.deviceNamePrefixes) {
+        if (this._destroyed) break;
+        const devices = await ESPProvisionManager.searchESPDevices(
+          prefix,
+          ESPTransport.ble,
+          toEspSecurity(this.config.security),
+        );
+        for (const d of devices) {
+          if (!matched.has(d.name)) matched.set(d.name, d);
         }
-
-        log.error('Scan error:', error.message);
-        const isUnauthorized =
-          /not authorized|BluetoothLE/i.test(error.message);
-        const scanErr = isUnauthorized
-          ? new BleLibraryError('unauthorized', `BLE scan error: ${error.message}`)
-          : new BleLibraryError('scan_error', `BLE scan error: ${error.message}`);
-        this.emit('error', scanErr);
-        this.stopScanInternal();
-        this.setConnectionState('disconnected');
-        this.emit('scanStopped');
-        return;
       }
+    } catch (err) {
+      this.clearScanTimeout();
+      if (this._destroyed) return;
+      const message = err instanceof Error ? err.message : String(err);
+      log.error('Scan failed:', message);
 
-      if (!device) {
-        return;
-      }
+      const code = /unauth/i.test(message)
+        ? 'unauthorized'
+        : /off|disabled/i.test(message)
+        ? 'powered_off'
+        : 'scan_error';
+      this.emit(
+        'error',
+        new BleLibraryError(code as never, `BLE scan error: ${message}`),
+      );
+      this.setConnectionState('disconnected');
+      this.emit('scanStopped');
+      return;
+    }
 
-      const name = device.localName ?? device.name;
+    this.clearScanTimeout();
+    if (this._destroyed) return;
 
-      // Track all unique devices for diagnostics
-      if (!allSeenIds.has(device.id)) {
-        allSeenIds.add(device.id);
-        seenNames.set(device.id, name ?? null);
-        log.debug('Scan saw device:', { id: device.id, name, rssi: device.rssi });
-      }
-
-      if (!name || !this.config.deviceNamePrefixes.some((p) => name.startsWith(p))) {
-        return;
-      }
-
-      // Deduplicate — only emit once per device per scan session.
-      if (this.discoveredDeviceIds.has(device.id)) {
-        return;
-      }
-      this.discoveredDeviceIds.add(device.id);
-
+    for (const device of matched.values()) {
       const discovered: DiscoveredDevice = {
-        id: device.id,
-        name,
-        rssi: device.rssi ?? 0,
+        id: device.name, // SDK uses name as the connection key on iOS
+        name: device.name,
+        rssi: null, // not surfaced by the SDK
       };
-
-      log.debug('Device discovered:', discovered);
       this.emit('deviceDiscovered', discovered);
+    }
+
+    this.emit('scanCompleted', {
+      matched: matched.size,
+      total: matched.size,
+      sampleNames: [],
     });
 
-    // Auto-stop after timeout.
-    this.scanTimeoutId = setTimeout(() => {
-      const matched = this.discoveredDeviceIds.size;
-      const total = allSeenIds.size;
-      const prefixLabel = this.config.deviceNamePrefixes.join(', ');
-      log.info(`Scan timeout: saw ${total} device(s), ${matched} matched prefixes [${prefixLabel}]`);
-
-      const sampleNames = Array.from(seenNames.values())
-        .filter((n): n is string => n !== null)
-        .slice(0, 5);
-
-      // Always emit scanCompleted with diagnostics; the `error` channel is
-      // reserved for true failures so an empty scan doesn't surface as a
-      // banner. UIs handle "no devices" via the empty discovered-list state.
-      this.emit('scanCompleted', { matched, total, sampleNames });
-
-      this.stopScan();
-    }, this.config.scanTimeoutMs);
+    this.setConnectionState('disconnected');
+    this.emit('scanStopped');
+    log.info(`Scan completed: ${matched.size} matched device(s)`);
   }
 
+  /**
+   * Cancel an in-flight scan. Safe to call when no scan is running.
+   */
   stopScan(): void {
     if (this._connectionState !== 'scanning') {
       return;
     }
-
-    this.stopScanInternal();
-    this.setConnectionState('disconnected');
-    this.emit('scanStopped');
-    log.info('Scan stopped');
+    log.info('Stop scan requested');
+    this.clearScanTimeout();
+    try {
+      ESPProvisionManager.stopESPDevicesSearch();
+    } catch {
+      // SDK may have already finished.
+    }
+    // The startScan() promise will resolve naturally once the SDK returns;
+    // it will emit scanStopped and reset state then.
   }
 
   // ────────────────────────────────────────────────────────────────────
   // Connection
   // ────────────────────────────────────────────────────────────────────
 
+  /**
+   * Connect to a discovered device. Combines BLE link establishment with
+   * the protocomm session-init handshake (Security 0/1/2 negotiation,
+   * PoP / SRP exchange).
+   *
+   * Returns a `ConnectedDeviceInfo` describing the active device. Throws
+   * a `BleLibraryError` on failure.
+   */
   async connect(deviceId: string): Promise<ConnectedDeviceInfo> {
     log.info('Connecting to device:', deviceId);
 
     // Stop any active scan before connecting.
     if (this._connectionState === 'scanning') {
-      this.stopScanInternal();
-      this.emit('scanStopped');
+      this.stopScan();
     }
 
     this.setConnectionState('connecting');
 
-    // Ensure the BLE adapter is ready before connecting.
-    const ready = await this.waitForPoweredOn();
-    if (!ready) {
-      this.setConnectionState('disconnected');
-      throw new Error('Bluetooth adapter is not ready');
-    }
+    const device = new ESPDevice({
+      name: deviceId,
+      transport: ESPTransport.ble,
+      security: toEspSecurity(this.config.security),
+    });
 
     try {
-      // 1. Connect to the device.
-      const connectedDevice = await this.bleManager.connectToDevice(deviceId, {
-        requestMTU: this.config.requestedMtu,
-        timeout: this.config.connectionTimeoutMs,
-      });
-
-      log.debug('Device connected, discovering services...');
-
-      // 2. Discover all services and characteristics.
-      const discoveredDevice = await connectedDevice.discoverAllServicesAndCharacteristics();
-      this.device = discoveredDevice;
-
-      // 3. Find and validate our three characteristics.
-      const characteristics = await discoveredDevice.characteristicsForService(SERVICE_UUID);
-      log.debug(`Found ${characteristics.length} characteristics for service ${SERVICE_UUID}`);
-
-      const statusCharUuidLower = STATUS_CHAR_UUID.toLowerCase();
-      const commandCharUuidLower = COMMAND_CHAR_UUID.toLowerCase();
-      const responseCharUuidLower = RESPONSE_CHAR_UUID.toLowerCase();
-
-      let foundStatus = false;
-      let foundCommand = false;
-      let foundResponse = false;
-
-      for (const char of characteristics) {
-        const uuid = char.uuid.toLowerCase();
-        if (uuid === statusCharUuidLower) {
-          foundStatus = true;
-        } else if (uuid === commandCharUuidLower) {
-          foundCommand = true;
-        } else if (uuid === responseCharUuidLower) {
-          foundResponse = true;
-        }
-      }
-
-      if (!foundStatus || !foundCommand || !foundResponse) {
-        const missing = [
-          !foundStatus && 'Status',
-          !foundCommand && 'Command',
-          !foundResponse && 'Response',
-        ].filter(Boolean);
-        throw new Error(
-          `Missing required characteristics: ${missing.join(', ')}. ` +
-            'Ensure the ESP32 firmware exposes the WiFi Manager BLE service.',
-        );
-      }
-
-      // 4. Set up notification monitoring on Response characteristic.
-      this.responseBuffer = '';
-      this.responseSubscription = discoveredDevice.monitorCharacteristicForService(
-        SERVICE_UUID,
-        RESPONSE_CHAR_UUID,
-        (error: BleError | null, characteristic: Characteristic | null) => {
-          if (this._destroyed) return;
-          if (error) {
-            log.error('Response notification error:', error.message);
-            this.emit('error', new Error(`Response notification error: ${error.message}`));
-            return;
-          }
-          if (characteristic?.value) {
-            this.handleNotification('response', characteristic.value);
-          }
-        },
-      );
-
-      // 5. Set up notification monitoring on Status characteristic.
-      this.statusBuffer = '';
-      this.statusSubscription = discoveredDevice.monitorCharacteristicForService(
-        SERVICE_UUID,
-        STATUS_CHAR_UUID,
-        (error: BleError | null, characteristic: Characteristic | null) => {
-          if (this._destroyed) return;
-          if (error) {
-            log.error('Status notification error:', error.message);
-            this.emit('error', new Error(`Status notification error: ${error.message}`));
-            return;
-          }
-          if (characteristic?.value) {
-            this.handleNotification('status', characteristic.value);
-          }
-        },
-      );
-
-      // 6. Monitor unexpected disconnection from the device side.
-      this.disconnectSubscription = this.bleManager.onDeviceDisconnected(
-        deviceId,
-        (error: BleError | null) => {
-          log.warn('Device disconnected unexpectedly', error?.message);
-          this.handleUnexpectedDisconnect();
-        },
-      );
-
-      // 7. Build the connected device info.
-      const deviceName = discoveredDevice.localName ?? discoveredDevice.name ?? deviceId;
-      this._connectedDeviceInfo = {
-        id: discoveredDevice.id,
-        name: deviceName,
-        mtu: discoveredDevice.mtu ?? null,
-      };
-
-      this.setConnectionState('connected');
-      log.info('Connected successfully', this._connectedDeviceInfo);
-
-      return this._connectedDeviceInfo;
+      const username =
+        this.config.security === 2 ? this.config.username : null;
+      await device.connect(this.config.proofOfPossession, null, username);
     } catch (err) {
-      const error = err instanceof Error ? err : new Error(String(err));
-      log.error('Connection failed:', error.message);
-      this.cleanupSubscriptions();
-
-      // Cancel the BLE-level connection to avoid a phantom radio connection
-      // (e.g. when characteristic validation fails after the radio connects).
-      if (this.device?.id) {
-        try {
-          await this.bleManager.cancelDeviceConnection(this.device.id);
-        } catch {
-          // Device may already be gone — ignore.
-        }
-      }
-
-      this.device = null;
+      const message = err instanceof Error ? err.message : String(err);
+      log.error('Connect failed:', message);
+      this._device = null;
       this._connectedDeviceInfo = null;
       this.setConnectionState('disconnected');
-      this.emit('error', error);
-      throw error;
+      const code: 'unauthorized' | 'connect_error' = /unauth/i.test(message)
+        ? 'unauthorized'
+        : 'connect_error';
+      throw new BleLibraryError(code, `BLE connect error: ${message}`);
     }
+
+    this._device = device;
+    this._connectedDeviceInfo = {
+      id: deviceId,
+      name: deviceId,
+      mtu: null, // not surfaced by the SDK
+    };
+    this.setConnectionState('connected');
+    log.info('Connected successfully', this._connectedDeviceInfo);
+    return this._connectedDeviceInfo;
   }
 
   // ────────────────────────────────────────────────────────────────────
@@ -408,243 +313,61 @@ export class BleTransport extends TypedEventEmitter<BleTransportEvents> {
 
   async disconnect(): Promise<void> {
     log.info('Disconnect requested');
-    const deviceId = this.device?.id;
-
-    this.cleanupSubscriptions();
-
-    if (deviceId) {
+    if (this._device) {
       try {
-        await this.bleManager.cancelDeviceConnection(deviceId);
-        log.debug('Device connection cancelled');
+        this._device.disconnect();
       } catch (err) {
-        // Ignore errors during disconnect — the device may already be gone.
         log.debug('Ignoring disconnect error:', err);
       }
     }
-
-    this.device = null;
+    this._device = null;
     this._connectedDeviceInfo = null;
-    this.responseBuffer = '';
-    this.statusBuffer = '';
-    this.lastWriteTime = 0;
     this.setConnectionState('disconnected');
   }
 
   // ────────────────────────────────────────────────────────────────────
-  // Write
-  // ────────────────────────────────────────────────────────────────────
-
-  async writeCommand(jsonString: string): Promise<void> {
-    if (this._destroyed || !this.device || this._connectionState !== 'connected') {
-      throw new Error('Cannot write command: not connected');
-    }
-
-    // Enforce GATT settle delay to avoid "GATT operation already in progress" errors.
-    const elapsed = Date.now() - this.lastWriteTime;
-    const delay = Math.max(0, this.config.gattSettleMs - elapsed);
-
-    if (delay > 0) {
-      log.debug(`GATT settle delay: ${delay}ms`);
-      await new Promise<void>((resolve) => setTimeout(resolve, delay));
-    }
-
-    const base64Value = stringToBase64(jsonString);
-    log.debug('Writing command:', jsonString.length, 'chars,', base64Value.length, 'base64 bytes');
-
-    try {
-      await this.device.writeCharacteristicWithResponseForService(
-        SERVICE_UUID,
-        COMMAND_CHAR_UUID,
-        base64Value,
-      );
-      this.lastWriteTime = Date.now();
-    } catch (err) {
-      const error = err instanceof Error ? err : new Error(String(err));
-      log.error('Write command failed:', error.message);
-      this.emit('error', error);
-      throw error;
-    }
-  }
-
-  // ────────────────────────────────────────────────────────────────────
-  // Destroy
+  // Lifecycle
   // ────────────────────────────────────────────────────────────────────
 
   async destroy(): Promise<void> {
-    log.info('Destroying BleTransport');
+    if (this._destroyed) return;
     this._destroyed = true;
+    log.info('Destroying transport');
 
-    this.removeAllListeners();
-
-    await this.disconnect();
-
-    if (this.bleStateSubscription) {
-      this.bleStateSubscription.remove();
-      this.bleStateSubscription = null;
-    }
-
-    // BleManager.destroy() is async — it awaits destroyClient() internally
-    // and then rejects any remaining active _callPromise() promises.  If the
-    // native destroyClient() call fails (e.g. because the BLE stack is in a
-    // transitional state after disconnect), the returned promise rejects.
-    // We must await and catch to prevent unhandled promise rejections.
+    this.clearScanTimeout();
     try {
-      await this.bleManager.destroy();
-    } catch (err) {
-      log.debug('Ignoring BleManager.destroy() error:', err);
+      ESPProvisionManager.stopESPDevicesSearch();
+    } catch {
+      /* ignore */
     }
 
-    log.info('BleTransport destroyed');
-  }
-
-  // ────────────────────────────────────────────────────────────────────
-  // Private helpers
-  // ────────────────────────────────────────────────────────────────────
-
-  /**
-   * Handle a base64-encoded notification from Response or Status characteristic.
-   * Appends decoded text to the appropriate buffer and emits when a complete
-   * JSON object has been received (detected by trailing '}').
-   */
-  private handleNotification(type: 'response' | 'status', base64Value: string): void {
-    const chunk = base64ToString(base64Value);
-    log.debug(`${type} notification chunk:`, chunk.length, 'chars');
-
-    if (type === 'response') {
-      this.responseBuffer += chunk;
-      if (this.responseBuffer.trimEnd().endsWith('}')) {
-        const completeJson = this.responseBuffer;
-        this.responseBuffer = '';
-        log.debug('Complete response JSON received:', completeJson.length, 'chars');
-        this.emit('response', completeJson);
-      }
-    } else {
-      this.statusBuffer += chunk;
-      if (this.statusBuffer.trimEnd().endsWith('}')) {
-        const completeJson = this.statusBuffer;
-        this.statusBuffer = '';
-        log.debug('Complete status JSON received:', completeJson.length, 'chars');
-        this.emit('status', completeJson);
-      }
-    }
-  }
-
-  /**
-   * Wait for the BLE adapter to reach PoweredOn state.
-   *
-   * Uses a polling approach instead of onStateChange(_, true) because
-   * react-native-ble-plx has an unhandled-rejection bug in that code path
-   * when the CBCentralManager is still in Unknown state.
-   *
-   * Returns true if PoweredOn, false if unavailable (emits error events).
-   */
-  private async waitForPoweredOn(): Promise<boolean> {
-    const maxWaitMs = 10_000;
-    const pollMs = 200;
-    const deadline = Date.now() + maxWaitMs;
-
-    while (Date.now() < deadline) {
-      let state: State;
+    if (this._device) {
       try {
-        state = await this.bleManager.state();
+        this._device.disconnect();
       } catch {
-        // state() can throw BleErrorCode 103 before CBCentralManager is ready
-        state = State.Unknown;
+        /* ignore */
       }
-
-      if (state === State.PoweredOn) {
-        return true;
-      }
-
-      if (state === State.Unauthorized) {
-        log.error('BLE adapter unauthorized:', state);
-        this.setConnectionState('disconnected');
-        this.emit('scanStopped');
-        this.emit('error', new BleLibraryError('unauthorized', `Bluetooth is ${state}`));
-        return false;
-      }
-
-      if (state === State.PoweredOff) {
-        log.error('BLE adapter powered off:', state);
-        this.setConnectionState('disconnected');
-        this.emit('scanStopped');
-        this.emit('error', new BleLibraryError('powered_off', `Bluetooth is ${state}`));
-        return false;
-      }
-
-      if (state === State.Unsupported) {
-        log.error('BLE adapter unsupported:', state);
-        this.setConnectionState('disconnected');
-        this.emit('scanStopped');
-        this.emit('error', new BleLibraryError('unsupported', `Bluetooth is ${state}`));
-        return false;
-      }
-
-      // Still Unknown or Resetting — wait and retry
-      await new Promise<void>((r) => setTimeout(r, pollMs));
     }
-
-    // Timed out waiting for BLE adapter
-    log.error('Timed out waiting for BLE adapter to power on');
-    this.setConnectionState('disconnected');
-    this.emit('scanStopped');
-    this.emit('error', new BleLibraryError('adapter_timeout', 'Bluetooth adapter did not become ready'));
-    return false;
-  }
-
-  /** Handle unexpected disconnection (device side or Bluetooth off). */
-  private handleUnexpectedDisconnect(): void {
-    const deviceId = this.device?.id;
-    this.cleanupSubscriptions();
-    this.device = null;
+    this._device = null;
     this._connectedDeviceInfo = null;
-    this.responseBuffer = '';
-    this.statusBuffer = '';
-    this.lastWriteTime = 0;
-    this.setConnectionState('disconnected');
-
-    // Close the Android GATT client to free resources. cancelDeviceConnection
-    // is safe to call on an already-disconnected device.
-    if (deviceId) {
-      this.bleManager.cancelDeviceConnection(deviceId).catch(() => {
-        // Expected to fail if the device is already fully gone — ignore.
-      });
-    }
+    this._connectionState = 'disconnected';
+    this.removeAllListeners();
   }
 
-  /** Stop the BLE scan and clear the timeout, without emitting events. */
-  private stopScanInternal(): void {
+  // ────────────────────────────────────────────────────────────────────
+  // Internals
+  // ────────────────────────────────────────────────────────────────────
+
+  private setConnectionState(state: BleConnectionState): void {
+    if (this._connectionState === state) return;
+    this._connectionState = state;
+    this.emit('connectionStateChanged', state);
+  }
+
+  private clearScanTimeout(): void {
     if (this.scanTimeoutId !== null) {
       clearTimeout(this.scanTimeoutId);
       this.scanTimeoutId = null;
     }
-    this.bleManager.stopDeviceScan();
-  }
-
-  /** Remove all characteristic and disconnection subscriptions. */
-  private cleanupSubscriptions(): void {
-    if (this.responseSubscription) {
-      this.responseSubscription.remove();
-      this.responseSubscription = null;
-    }
-    if (this.statusSubscription) {
-      this.statusSubscription.remove();
-      this.statusSubscription = null;
-    }
-    if (this.disconnectSubscription) {
-      this.disconnectSubscription.remove();
-      this.disconnectSubscription = null;
-    }
-  }
-
-  /** Update connection state and emit the change event. */
-  private setConnectionState(state: BleConnectionState): void {
-    if (this._connectionState === state) {
-      return;
-    }
-    const previous = this._connectionState;
-    this._connectionState = state;
-    log.info(`Connection state: ${previous} -> ${state}`);
-    this.emit('connectionStateChanged', state);
   }
 }

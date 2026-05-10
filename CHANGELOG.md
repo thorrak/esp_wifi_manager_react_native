@@ -1,5 +1,74 @@
 # Changelog
 
+## 2.0.0 — 2026-05-10
+
+ESP-IDF Network Provisioning over BLE (matches `esp_wifi_config` 0.1.0+).
+
+### Breaking
+
+- **The custom 0xFFE0 GATT protocol is gone.** This release talks to
+  Espressif's official Wi-Fi Provisioning manager via the
+  `@orbital-systems/react-native-esp-idf-provisioning` native SDK
+  (which itself wraps Espressif's iOS / Android SDKs). The previous
+  raw `react-native-ble-plx` + JSON-over-GATT path is removed.
+- **Peer dependency change**: `react-native-ble-plx` is replaced by
+  `@orbital-systems/react-native-esp-idf-provisioning` (>=0.5.0).
+  Update your project's `package.json` and re-run pod install.
+- **Default scan prefix changed**: `"ESP32-WiFi-"` → `"PROV_"` (matches
+  the firmware's `CONFIG_WIFI_CFG_NETWORK_PROVISIONING_SERVICE_PREFIX`
+  Kconfig default). Override via `ProvisioningConfig.ble.deviceNamePrefix`.
+- **New `BleTransportConfig.security` / `proofOfPossession` / `username`
+  fields** — required for the protocomm session-init handshake. The
+  defaults (Security 1, PoP `"abcd1234"`) match the firmware's Kconfig
+  defaults; production fleets MUST override per device.
+- **Removed protocol commands** (no longer exposed by firmware over BLE):
+  `getStatus`, `listNetworks`, `addNetwork`, `delNetwork`, `connectWifi`,
+  `disconnectWifi`, `getApStatus`, `startAp`, `stopAp`, `factoryReset`.
+  Wi-Fi management for these still exists — just over the device's
+  HTTP API once it's on the network. The wizard's WiFi-credential
+  exchange now goes through the SDK's atomic `provision()` call.
+- **No `ConnectionPoller`.** The SDK's `provision()` resolves on
+  STA-connect success or rejects on failure, so the joiningWifi step
+  awaits that promise directly. The `polling`, `wifiState`, `wifiSsid`,
+  `wifiIp`, `wifiRssi`, `wifiQuality` fields are gone from the store
+  and `useProvisioning()` return value.
+- **Removed hooks**: `useWifiStatus`, `useSavedNetworks`, `useAccessPoint`.
+  Removed components: `StatusBadge`, `ApSettings`, `SavedNetworkList`,
+  `SavedNetworkItem`. The `manage` step is now a minimal device-info +
+  variable-editor screen.
+- **Error source renamed**: `ProvisioningError.source = 'poller'` →
+  `'provision'`. The `'flow'`/`'ble'`/`'protocol'` sources are unchanged.
+
+### Added
+
+- `DeviceProtocol.getVersion()`, `getCapabilities()`, `getNetworkPolicy()`
+  — wrap the new firmware custom protocomm endpoints
+  (`esp-wifi-config-version`, `…-capabilities`, `…-network-policy`).
+- `DeviceProtocol.listVars()`, `delVar()` — alongside the existing
+  `getVar`/`setVar`, now backed by the `esp-wifi-config-vars` endpoint.
+- `DeviceProtocol.scanWifi()` and `provision()` — typed wrappers around
+  the SDK's `scanWifiList()` and `provision()`.
+- `BleTransport.espDevice` getter — exposes the underlying SDK device
+  for advanced flows.
+- New types: `SecurityVersion`, `DeviceVersionInfo`, `DeviceCapabilities`,
+  `DeviceNetworkPolicy`, `VarsRequest`, `VarsResponse`, `ProvisionResult`.
+
+### Migration notes
+
+- Replace the `react-native-ble-plx` peer dep with
+  `@orbital-systems/react-native-esp-idf-provisioning` and re-run
+  `pod install` on iOS.
+- If you set `ProvisioningConfig.ble.deviceNamePrefix`, swap your
+  custom prefix for `"PROV_"` (or whatever your firmware's
+  `CONFIG_WIFI_CFG_NETWORK_PROVISIONING_SERVICE_PREFIX` is).
+- Add `ProvisioningConfig.ble.proofOfPossession` if your firmware uses
+  a non-default PoP. Set `security: 2` plus `username` for SRP6a.
+- Anywhere you read `wifiState`/`wifiIp`/`wifiSsid`/etc. from
+  `useProvisioning()`, switch to `lastProvisionResult` (SDK status +
+  SSID) or fetch the IP from your device's HTTP API after success.
+- If you used `useDeviceProtocol().addNetwork(...) + connectWifi(...)`
+  outside the wizard, replace with `protocol.provision(ssid, password)`.
+
 ## 1.0.0
 
 Initial public release. Restructured around a granular step machine, unified error envelope, and verb-named action surface.

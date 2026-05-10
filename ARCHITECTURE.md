@@ -2,7 +2,22 @@
 
 React Native library for BLE-based WiFi provisioning of ESP32 devices running `esp_wifi_config`. Provides both headless hooks and pre-built UI components.
 
-> **v1.0.0 update:** The library was restructured around a granular 10-step machine, a unified `ProvisioningError` envelope, and verb-named action methods. Sections describing the previous step enum (`'connect' | 'networks' | 'credentials' | 'connecting'`), the `provisioningError`/`bleError`/`pollError` field set, and method names like `scanForDevices`/`connectToDevice`/`submitCredentials`/`reset` are stale and being rewritten. For the current contract, see [CLAUDE.md](./CLAUDE.md), [API.md](./API.md), [CHANGELOG.md](./CHANGELOG.md), and the source comments in `src/services/ProvisioningManager.ts` + `src/types/provisioning.ts`. The four-layer architecture (BleTransport → DeviceProtocol → ConnectionPoller → ProvisioningManager → Zustand → hooks → screens) is unchanged.
+> **v2.0.0 update — partial freshness.** v2 wraps Espressif's native
+> ESP-IDF Network Provisioning SDK
+> (`@orbital-systems/react-native-esp-idf-provisioning`) instead of
+> driving raw GATT writes. The architecture is now **three** layers,
+> not four (`ConnectionPoller` is gone — the SDK's atomic `provision()`
+> replaces the polling loop). The step machine, store shape, and
+> action verbs are unchanged from v1.0. For the v2 mental model and
+> any places where this document conflicts with the code, prefer:
+>
+>   - [CLAUDE.md](./CLAUDE.md) for the current layer model
+>   - [CHANGELOG.md](./CHANGELOG.md) for the v1 → v2 diff
+>   - the source comments in `src/services/` and `src/types/`
+>
+> v1 sections that describe BLE I/O details (GATT writes, JSON
+> reassembly, MTU negotiation, `react-native-ble-plx` adapter state)
+> are now handled by the native SDK and no longer apply.
 
 ---
 

@@ -1,5 +1,7 @@
 # Headless usage — service classes without React
 
+> **v2.x note.** Method names changed in v2: drop `addNetwork`/`connectWifi`/`getStatus`/`startAp`/etc. Use `protocol.provision(ssid, password)` (atomic) and `protocol.scanWifi()`. Custom application config goes through `protocol.getVar`/`setVar`/`listVars`. The transport now requires Security 1 + a PoP — see CHANGELOG.md.
+
 **When to use this:** automated tests, CLI scripts, background tasks, or non-React frameworks. You want the BLE protocol stack but not React or Zustand.
 
 **What you'll end up with:** a TypeScript script that scans, connects, provisions, and reports — no hooks, no UI, no store.

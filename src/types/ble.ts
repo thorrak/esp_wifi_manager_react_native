@@ -1,9 +1,21 @@
+/**
+ * BLE-related types for ESP-IDF Network Provisioning.
+ *
+ * The transport now wraps `@orbital-systems/react-native-esp-idf-provisioning`
+ * (which in turn wraps Espressif's native iOS / Android SDKs). The events
+ * exposed here mirror the v1 transport API as closely as possible so the
+ * surrounding store / hooks / screens continue to work — but the
+ * underlying mechanism is fundamentally different (no live discovery
+ * stream, no GATT writes from JS, no JSON reassembly).
+ */
+
 export type BleErrorCode =
   | 'unauthorized'
   | 'powered_off'
   | 'unsupported'
   | 'scan_error'
-  | 'adapter_timeout'
+  | 'connect_error'
+  | 'provision_error'
   | 'unknown';
 
 export class BleLibraryError extends Error {
@@ -22,19 +34,30 @@ export type BleConnectionState =
   | 'connecting'
   | 'connected';
 
+/**
+ * A device found by the SDK during a scan. The `id` is whatever the SDK
+ * returns (BLE peripheral identifier on iOS, MAC address on Android), and
+ * `name` is the GAP-advertised name (typically `PROV_xxxxxx`).
+ */
 export interface DiscoveredDevice {
-  /** Platform device ID (UUID on iOS, MAC on Android) */
   id: string;
-  /** Advertised device name, e.g. "ESP32-WiFi-A1B2C3" */
+  /** Advertised device name, e.g. "PROV_AB12CD" */
   name: string;
-  /** RSSI at discovery time */
-  rssi: number;
+  /**
+   * RSSI at discovery time. The native SDK does not always surface this;
+   * `null` when unknown.
+   */
+  rssi: number | null;
 }
 
 export interface ConnectedDeviceInfo {
   id: string;
   name: string;
-  /** Negotiated MTU (null if not yet negotiated) */
+  /**
+   * Reported negotiated MTU. Always `null` for the SDK transport — the
+   * native layer manages MTU internally and doesn't surface it. Kept on
+   * the type so the store/UI shape stays stable from v1.
+   */
   mtu: number | null;
 }
 
@@ -42,36 +65,54 @@ export interface ConnectedDeviceInfo {
 export interface ScanCompletedInfo {
   /** Number of devices that matched the configured name prefix(es). */
   matched: number;
-  /** Total number of unique devices observed during the scan. */
+  /**
+   * Total number of unique devices observed during the scan. The native
+   * SDK only surfaces matched devices, so `total` always equals `matched`.
+   */
   total: number;
-  /** Up to 5 names from non-matching devices, for diagnostics. */
+  /**
+   * Names of non-matching devices seen during the scan. Always empty for
+   * the SDK transport — kept for shape compatibility with v1.
+   */
   sampleNames: string[];
 }
 
 export interface BleTransportEvents {
-  response: (json: string) => void;
-  status: (json: string) => void;
   connectionStateChanged: (state: BleConnectionState) => void;
-  deviceDiscovered: (device: DiscoveredDevice) => void;
   /**
-   * Fires once per scan cycle when the scan timer expires (or `stopScan()`
-   * is called). Always emitted, regardless of whether any devices matched.
+   * Emitted once per matched device after the SDK scan completes. The SDK
+   * does not stream individual discoveries — devices land in the store
+   * as a batch.
    */
+  deviceDiscovered: (device: DiscoveredDevice) => void;
+  /** Fires once per scan cycle when results are in (or timeout fires). */
   scanCompleted: (info: ScanCompletedInfo) => void;
   scanStopped: () => void;
   /** Emitted only for genuine failures (BLE off, unauthorized, scan_error). */
   error: (error: Error) => void;
 }
 
+/**
+ * Security version selector. Maps onto the SDK's `ESPSecurity` enum and
+ * the firmware's `CONFIG_WIFI_CFG_NETWORK_PROVISIONING_SECURITY_*` choice.
+ */
+export type SecurityVersion = 0 | 1 | 2;
+
 export interface BleTransportConfig {
-  /** Device name prefix(es) to filter during scanning. Default: "ESP32-WiFi-" */
+  /** Device name prefix(es) to filter during scanning. Default: `"PROV_"`. */
   deviceNamePrefix?: string | string[];
-  /** Scan timeout in ms. Default: 10000 */
+  /** Scan timeout in ms. Default: 10000. */
   scanTimeoutMs?: number;
-  /** Minimum delay between GATT writes in ms. Default: 120 */
-  gattSettleMs?: number;
-  /** Connection timeout in ms. Default: 10000 */
-  connectionTimeoutMs?: number;
-  /** MTU to request. Default: 517 */
-  requestedMtu?: number;
+  /**
+   * Security version used during the protocomm session.
+   * Default: 1 (matches the firmware's default).
+   */
+  security?: SecurityVersion;
+  /**
+   * Proof-of-possession (Security 1) or SRP password (Security 2).
+   * Default: `"abcd1234"` (Kconfig default; override per-device for production).
+   */
+  proofOfPossession?: string;
+  /** SRP6a username for Security 2. Default: `"wificfg"`. */
+  username?: string;
 }

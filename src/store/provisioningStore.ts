@@ -1,13 +1,15 @@
 /**
- * Zustand store — bridges the four service layers into React.
+ * Zustand store — bridges the service layers into React.
  *
- * Two responsibilities:
- *   1. Mirror service state into Zustand state via event subscriptions
- *   2. Expose actions that delegate to services (verb-named, 1:1 with manager)
- *
- * The store IS the canonical reactive state surface. Hooks read from it; the
- * manager emits events that fan out into store updates. Service event
- * subscriptions are wired lazily on first action call (`ensureInitialized`).
+ * v2 differences from v1:
+ *   - No `polling` / WiFi-state fields. The SDK's atomic provision() call
+ *     replaces the poller, so the store no longer carries `wifiState`,
+ *     `wifiSsid`, `wifiIp`, `wifiRssi`, `wifiQuality`, `polling`.
+ *   - No `addNetwork` / `delNetwork` / `connectWifi` / `disconnectWifi`
+ *     / `getApStatus` / `startAp` / `stopAp` / `factoryReset` actions —
+ *     those endpoints don't exist in the new firmware protocol.
+ *   - New: `getVersion`, `getCapabilities`, `getNetworkPolicy`,
+ *     `listVars`, `delVar` actions for the custom protocomm endpoints.
  */
 
 import { create } from 'zustand';
@@ -15,70 +17,53 @@ import { create } from 'zustand';
 import {
   destroyServices,
   getManager,
-  getPoller,
   getProtocol,
   getTransport,
   initializeServices,
 } from '../serviceFactory';
 
 import type {
-  AddNetworkParams,
-  ApStatus,
+  DeviceCapabilities,
   DeviceConnection,
+  DeviceNetworkPolicy,
   DeviceVariable,
+  DeviceVersionInfo,
   DiscoveredDevice,
   ProvisioningConfig,
   ProvisioningError,
   ProvisioningResult,
   ProvisioningStep,
-  SavedNetwork,
+  ProvisionResult,
   ScanCompletedInfo,
   ScannedNetwork,
-  StartApParams,
-  WifiConnectionState,
-  WifiStatus,
 } from '../types';
 
 // ---------------------------------------------------------------------------
-// State interface
+// State
 // ---------------------------------------------------------------------------
 
 export interface ProvisioningStoreState {
   // -- Wizard --
-  /** Current step in the provisioning state machine. */
   step: ProvisioningStep;
-  /** Most recent unified error envelope, or `null` when no error is active. */
   error: ProvisioningError | null;
   /** Latest successful result. Survives `cancel()`; cleared on next `start()`. */
   lastResult: ProvisioningResult | null;
+  /** Most recent SDK provision() result. Cleared when starting a new run. */
+  lastProvisionResult: ProvisionResult | null;
 
   // -- Devices --
-  /** Discovered (but not yet selected) devices from the most recent scan. */
   discoveredDevices: DiscoveredDevice[];
-  /** Connection target / current connected device, or `null` when idle. */
   device: DeviceConnection;
-  /** Whether a BLE scan is currently in progress. */
   scanning: boolean;
-  /** Diagnostics from the most recent completed scan. */
   lastScanResult: ScanCompletedInfo | null;
 
   // -- WiFi --
-  /** Networks returned by the most recent WiFi scan, RSSI-sorted. */
   scannedNetworks: ScannedNetwork[];
-  /** Currently selected network (during credential entry / join). */
   selectedNetwork: ScannedNetwork | null;
-  /** Live WiFi state from the device while polling. */
-  wifiState: WifiConnectionState;
-  wifiSsid: string;
-  wifiIp: string;
-  wifiRssi: number;
-  wifiQuality: number;
-  /** Whether the connection poller is currently running. */
-  polling: boolean;
 }
 
 // ---------------------------------------------------------------------------
-// Actions interface
+// Actions
 // ---------------------------------------------------------------------------
 
 export interface ProvisioningStoreActions {
@@ -86,7 +71,7 @@ export interface ProvisioningStoreActions {
   initialize: (config?: ProvisioningConfig) => void;
   destroy: () => void;
 
-  // -- Wizard verbs (delegate to ProvisioningManager) --
+  // -- Wizard verbs --
   start: () => Promise<void>;
   chooseDevice: (target: DiscoveredDevice) => Promise<void>;
   proceedFromConfigure: () => Promise<void>;
@@ -94,41 +79,32 @@ export interface ProvisioningStoreActions {
   chooseNetwork: (network: ScannedNetwork) => void;
   backToNetworks: () => void;
   submitPassword: (password: string) => Promise<void>;
-  retryJoin: () => Promise<void>;
+  retryJoin: (password?: string) => Promise<void>;
   pickDifferentNetwork: () => Promise<void>;
   pickDifferentDevice: () => Promise<void>;
   cancel: () => Promise<void>;
   goToManage: () => void;
 
-  // -- Direct protocol commands (for advanced/headless paths) --
-  getStatus: () => Promise<WifiStatus>;
-  scanNetworks: () => Promise<ScannedNetwork[]>;
-  listNetworks: () => Promise<SavedNetwork[]>;
-  addNetwork: (params: AddNetworkParams) => Promise<void>;
-  delNetwork: (ssid: string) => Promise<void>;
-  connectWifi: (ssid?: string) => Promise<void>;
-  disconnectWifi: () => Promise<void>;
-  getApStatus: () => Promise<ApStatus>;
-  startAp: (params?: StartApParams) => Promise<void>;
-  stopAp: () => Promise<void>;
-  getVar: (key: string) => Promise<DeviceVariable>;
+  // -- Direct protocol commands --
+  scanWifi: () => Promise<ScannedNetwork[]>;
+  getVersion: () => Promise<DeviceVersionInfo>;
+  getCapabilities: () => Promise<DeviceCapabilities>;
+  getNetworkPolicy: () => Promise<DeviceNetworkPolicy>;
+  listVars: () => Promise<DeviceVariable[]>;
+  getVar: (key: string) => Promise<DeviceVariable | null>;
   setVar: (key: string, value: string) => Promise<void>;
-  factoryReset: () => Promise<void>;
-
-  // -- Poller (advanced) --
-  startPolling: (timeoutMs?: number, intervalMs?: number) => void;
-  stopPolling: () => void;
-  pollOnce: () => Promise<WifiStatus>;
+  delVar: (key: string) => Promise<void>;
 }
 
 // ---------------------------------------------------------------------------
-// Default state values
+// Default state
 // ---------------------------------------------------------------------------
 
 const initialState: ProvisioningStoreState = {
   step: 'welcome',
   error: null,
   lastResult: null,
+  lastProvisionResult: null,
 
   discoveredDevices: [],
   device: null,
@@ -137,24 +113,13 @@ const initialState: ProvisioningStoreState = {
 
   scannedNetworks: [],
   selectedNetwork: null,
-  wifiState: 'disconnected',
-  wifiSsid: '',
-  wifiIp: '',
-  wifiRssi: 0,
-  wifiQuality: 0,
-  polling: false,
 };
 
 // ---------------------------------------------------------------------------
-// Module-level subscription tracking
+// Subscription wiring
 // ---------------------------------------------------------------------------
 
 let unsubscribers: Array<() => void> = [];
-// Identity of the manager we're currently subscribed to. We track this (not
-// just the unsubscribers array length) so that if `destroyServices()` is
-// called externally and a fresh manager is created on the next
-// `initializeServices()`, we detect the change and re-wire — instead of
-// leaking subscriptions to the dead emitter and silently dropping events.
 let subscribedManager: object | null = null;
 
 type SetState = (
@@ -163,32 +128,22 @@ type SetState = (
     | ((state: ProvisioningStoreState) => Partial<ProvisioningStoreState>),
 ) => void;
 
-/**
- * Subscribe to all service events and sync state. Detects when the
- * underlying services have been replaced (via destroyServices() +
- * initializeServices()) and re-wires against the new manager.
- */
 function subscribeToServices(set: SetState): void {
   const manager = getManager();
   if (subscribedManager === manager) return;
 
-  // Different manager (or first time) — tear down any stale subscriptions
-  // before re-wiring.
   for (const unsub of unsubscribers) unsub();
   unsubscribers = [];
   subscribedManager = manager;
 
   const transport = getTransport();
-  const poller = getPoller();
 
-  // -- Transport ------------------------------------------------------------
-
+  // Transport
   unsubscribers.push(
     transport.on('connectionStateChanged', (state) => {
       set({ scanning: state === 'scanning' });
     }),
   );
-
   unsubscribers.push(
     transport.on('deviceDiscovered', (device) => {
       set((s) => ({
@@ -199,95 +154,55 @@ function subscribeToServices(set: SetState): void {
       }));
     }),
   );
-
   unsubscribers.push(
     transport.on('scanStopped', () => {
       set({ scanning: false });
     }),
   );
-
   unsubscribers.push(
     transport.on('scanCompleted', (info) => {
       set({ lastScanResult: info });
     }),
   );
 
-  // -- Poller ---------------------------------------------------------------
-
-  unsubscribers.push(
-    poller.on('wifiStateChanged', (status: WifiStatus) => {
-      set({
-        wifiState: status.state,
-        wifiSsid: status.ssid || '',
-        wifiIp: status.ip || '',
-        wifiRssi: status.rssi || 0,
-        wifiQuality: status.quality || 0,
-      });
-    }),
-  );
-
-  unsubscribers.push(
-    poller.on('connectionSucceeded', () => {
-      set({ polling: false });
-    }),
-  );
-
-  unsubscribers.push(
-    poller.on('connectionFailed', () => {
-      set({ polling: false });
-    }),
-  );
-
-  unsubscribers.push(
-    poller.on('connectionTimedOut', () => {
-      set({ polling: false });
-    }),
-  );
-
-  // -- Manager --------------------------------------------------------------
-
+  // Manager
   unsubscribers.push(
     manager.on('stepChanged', (step) => {
-      const updates: Partial<ProvisioningStoreState> = { step };
-      if (step === 'joiningWifi') updates.polling = true;
-      set(updates);
+      set({ step });
     }),
   );
-
   unsubscribers.push(
     manager.on('errorChanged', (error) => {
       set({ error });
     }),
   );
-
   unsubscribers.push(
     manager.on('scannedNetworksUpdated', (networks) => {
       set({ scannedNetworks: networks });
     }),
   );
-
   unsubscribers.push(
     manager.on('selectedNetworkChanged', (network) => {
       set({ selectedNetwork: network });
     }),
   );
-
   unsubscribers.push(
     manager.on('deviceConnectionChanged', (device) => {
       set({ device });
     }),
   );
-
   unsubscribers.push(
     manager.on('provisioningComplete', (result) => {
       set({ lastResult: result });
     }),
   );
-
+  unsubscribers.push(
+    manager.on('provisionResult', (result) => {
+      set({ lastProvisionResult: result });
+    }),
+  );
   unsubscribers.push(
     manager.on('provisioningReset', () => {
-      // Note: lastResult is intentionally preserved across reset so the
-      // success screen still has data after the device drops BLE post-join.
       set((s) => ({
         ...initialState,
         lastResult: s.lastResult,
@@ -296,7 +211,6 @@ function subscribeToServices(set: SetState): void {
   );
 }
 
-/** Ensure services + subscriptions are wired. Safe to call from any action. */
 function ensureInitialized(set: SetState, config?: ProvisioningConfig): void {
   initializeServices(config);
   subscribeToServices(set);
@@ -311,10 +225,7 @@ export const useProvisioningStore = create<
 >()((set) => ({
   ...initialState,
 
-  // =========================================================================
   // Lifecycle
-  // =========================================================================
-
   initialize: (config) => {
     ensureInitialized(set, config);
   },
@@ -327,15 +238,14 @@ export const useProvisioningStore = create<
     set(initialState);
   },
 
-  // =========================================================================
-  // Wizard verbs — delegate to ProvisioningManager
-  // =========================================================================
-
+  // Wizard verbs
   start: async () => {
     ensureInitialized(set);
-    // Clear lastResult at the start of a new run so the success screen from
-    // a previous provisioning doesn't leak into this one.
-    set({ lastResult: null, discoveredDevices: [] });
+    set({
+      lastResult: null,
+      lastProvisionResult: null,
+      discoveredDevices: [],
+    });
     await getManager().start();
   },
 
@@ -369,9 +279,9 @@ export const useProvisioningStore = create<
     await getManager().submitPassword(password);
   },
 
-  retryJoin: async () => {
+  retryJoin: async (password) => {
     ensureInitialized(set);
-    await getManager().retryJoin();
+    await getManager().retryJoin(password);
   },
 
   pickDifferentNetwork: async () => {
@@ -395,95 +305,37 @@ export const useProvisioningStore = create<
     getManager().goToManage();
   },
 
-  // =========================================================================
   // Direct protocol commands
-  // =========================================================================
-
-  getStatus: async () => {
+  scanWifi: async () => {
     ensureInitialized(set);
-    return getProtocol().getStatus();
+    return getProtocol().scanWifi();
   },
-
-  scanNetworks: async () => {
+  getVersion: async () => {
     ensureInitialized(set);
-    const result = await getProtocol().scan();
-    return result.networks;
+    return getProtocol().getVersion();
   },
-
-  listNetworks: async () => {
+  getCapabilities: async () => {
     ensureInitialized(set);
-    const result = await getProtocol().listNetworks();
-    return result.networks;
+    return getProtocol().getCapabilities();
   },
-
-  addNetwork: async (params) => {
+  getNetworkPolicy: async () => {
     ensureInitialized(set);
-    return getProtocol().addNetwork(params);
+    return getProtocol().getNetworkPolicy();
   },
-
-  delNetwork: async (ssid) => {
+  listVars: async () => {
     ensureInitialized(set);
-    return getProtocol().delNetwork(ssid);
+    return getProtocol().listVars();
   },
-
-  connectWifi: async (ssid) => {
-    ensureInitialized(set);
-    return getProtocol().connectWifi(ssid);
-  },
-
-  disconnectWifi: async () => {
-    ensureInitialized(set);
-    return getProtocol().disconnectWifi();
-  },
-
-  getApStatus: async () => {
-    ensureInitialized(set);
-    return getProtocol().getApStatus();
-  },
-
-  startAp: async (params) => {
-    ensureInitialized(set);
-    return getProtocol().startAp(params);
-  },
-
-  stopAp: async () => {
-    ensureInitialized(set);
-    return getProtocol().stopAp();
-  },
-
   getVar: async (key) => {
     ensureInitialized(set);
     return getProtocol().getVar(key);
   },
-
   setVar: async (key, value) => {
     ensureInitialized(set);
     return getProtocol().setVar(key, value);
   },
-
-  factoryReset: async () => {
+  delVar: async (key) => {
     ensureInitialized(set);
-    return getProtocol().factoryReset();
-  },
-
-  // =========================================================================
-  // Poller (advanced)
-  // =========================================================================
-
-  startPolling: (timeoutMs, intervalMs) => {
-    ensureInitialized(set);
-    set({ polling: true });
-    getPoller().startPolling(timeoutMs, intervalMs);
-  },
-
-  stopPolling: () => {
-    ensureInitialized(set);
-    getPoller().stopPolling();
-    set({ polling: false });
-  },
-
-  pollOnce: async () => {
-    ensureInitialized(set);
-    return getPoller().pollOnce();
+    return getProtocol().delVar(key);
   },
 }));

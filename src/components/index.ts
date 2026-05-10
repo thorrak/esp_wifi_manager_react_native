@@ -7,9 +7,6 @@ export type { LoadingSpinnerProps } from './LoadingSpinner';
 export { SignalIcon } from './SignalIcon';
 export type { SignalIconProps } from './SignalIcon';
 
-export { StatusBadge } from './StatusBadge';
-export type { StatusBadgeProps } from './StatusBadge';
-
 export { StepIndicator } from './StepIndicator';
 export type { StepIndicatorProps } from './StepIndicator';
 
@@ -24,15 +21,6 @@ export type { NetworkListItemProps } from './NetworkListItem';
 
 export { NetworkList } from './NetworkList';
 export type { NetworkListProps } from './NetworkList';
-
-export { SavedNetworkItem } from './SavedNetworkItem';
-export type { SavedNetworkItemProps } from './SavedNetworkItem';
-
-export { SavedNetworkList } from './SavedNetworkList';
-export type { SavedNetworkListProps } from './SavedNetworkList';
-
-export { ApSettings } from './ApSettings';
-export type { ApSettingsProps } from './ApSettings';
 
 export { VariableEditor } from './VariableEditor';
 export type { VariableEditorProps } from './VariableEditor';

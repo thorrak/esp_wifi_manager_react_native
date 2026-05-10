@@ -1,8 +1,21 @@
 # Post-provision device management
 
-**When to use this:** after a successful provision, you want to let the user view/delete saved networks, change the soft-AP, edit app variables, or factory-reset the device — all over the existing BLE connection.
+> **v2.x note.** This guide is largely superseded. ESP-IDF Network
+> Provisioning over BLE only exposes a small set of custom protocomm
+> endpoints (`esp-wifi-config-version`, `…-capabilities`,
+> `…-vars`, `…-network-policy`) — saved-network management, SoftAP
+> control, and factory reset all moved to the device's HTTP API once
+> it's on the network. The BLE-side hooks `useSavedNetworks` and
+> `useAccessPoint` were removed in v2.0.0; only `useDeviceVariables`
+> remains, plus the new `useDeviceProtocol().getVersion / getCapabilities
+> / getNetworkPolicy` for read-only diagnostics.
+>
+> For HTTP-side device management on the WiFi network see the firmware's
+> REST API documentation at https://configwifi.com/docs/api/rest-api.
 
-**What you'll end up with:** a "manage" screen that uses `useSavedNetworks`, `useAccessPoint`, and `useDeviceVariables` to interact with the device.
+**When to use this (v1):** after a successful provision, you want to let the user view/delete saved networks, change the soft-AP, edit app variables, or factory-reset the device — all over the existing BLE connection.
+
+**What you'll end up with (v1):** a "manage" screen that uses `useSavedNetworks`, `useAccessPoint`, and `useDeviceVariables` to interact with the device.
 
 ## Prereq — being on the `manage` step
 

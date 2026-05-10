@@ -1,8 +1,16 @@
 # esp-wifi-config-react-native
 
-BLE-based WiFi provisioning for ESP32 devices from React Native apps.
+BLE-based Wi-Fi provisioning for ESP32 devices from React Native apps.
 
-Talks to ESP32 devices running [esp_wifi_config](https://github.com/thorrak/esp_wifi_config) firmware over BLE GATT, drives a 10-step state machine, and ships pre-built screens you can drop in or replace.
+Talks to ESP32 devices running [esp_wifi_config](https://github.com/thorrak/esp_wifi_config) **0.1.0+** firmware via ESP-IDF's official Wi-Fi/Network Provisioning protocol over BLE, drives a 10-step state machine, and ships pre-built screens you can drop in or replace.
+
+> **2.x is a breaking rewrite.** v1 spoke a custom JSON-over-GATT
+> protocol that no longer exists in the firmware. v2 wraps Espressif's
+> native iOS/Android provisioning SDKs via
+> [`@orbital-systems/react-native-esp-idf-provisioning`](https://www.npmjs.com/package/@orbital-systems/react-native-esp-idf-provisioning).
+> See [CHANGELOG.md](./CHANGELOG.md) for the full migration list. If
+> you're still running esp_wifi_config 0.0.x firmware, pin to
+> `esp-wifi-config-react-native@^1`.
 
 **Platforms:** iOS, Android, Expo (custom development build).
 
@@ -21,7 +29,7 @@ See [GUIDES/](./GUIDES/) for end-to-end walkthroughs of each path.
 ## Installation
 
 ```bash
-npm install esp-wifi-config-react-native react-native-ble-plx
+npm install esp-wifi-config-react-native @orbital-systems/react-native-esp-idf-provisioning
 ```
 
 For pre-built screens add the navigation deps:
@@ -53,7 +61,7 @@ Use `requestBluetoothPermissions()` from this library to handle the runtime prom
 ### Expo
 
 ```bash
-npx expo install react-native-ble-plx expo-build-properties
+npx expo install @orbital-systems/react-native-esp-idf-provisioning
 npm install esp-wifi-config-react-native
 ```
 
@@ -63,7 +71,7 @@ npm install esp-wifi-config-react-native
   "expo": {
     "plugins": [
       ["expo-build-properties", { "ios": { "deploymentTarget": "13.4" } }],
-      ["react-native-ble-plx", { "isBackgroundEnabled": false, "neverForLocation": true }]
+      ["@orbital-systems/react-native-esp-idf-provisioning", { "isBackgroundEnabled": false, "neverForLocation": true }]
     ],
     "ios": {
       "infoPlist": {
@@ -240,14 +248,11 @@ Full guide: `GUIDES/05-error-handling.md`.
 
 | Hook | Returns |
 |------|------|
-| `useProvisioning` | step, device, error, lastResult, action verbs (full wizard) |
+| `useProvisioning` | step, device, error, lastResult, lastProvisionResult, action verbs (full wizard) |
 | `useDeviceScanner` | discoveredDevices, scanning, lastScanResult |
 | `useBleConnection` | device |
-| `useWifiStatus` | wifiState, wifiSsid, wifiIp, wifiRssi, wifiQuality, polling, pollOnce |
-| `useDeviceProtocol` | every command + per-instance loading + error |
-| `useDeviceVariables` | getVariable, setVariable + per-instance loading + error |
-| `useSavedNetworks` | networks, fetchNetworks, deleteNetwork, loading, error |
-| `useAccessPoint` | apStatus, startAp, stopAp, fetchApStatus, loading, error |
+| `useDeviceProtocol` | scanWifi, getVersion, getCapabilities, getNetworkPolicy, listVars, getVar, setVar, delVar + per-instance loading + error |
+| `useDeviceVariables` | listVariables, getVariable, setVariable, deleteVariable + per-instance loading + error |
 
 ## Pre-built screens
 
@@ -266,7 +271,7 @@ Each screen renders one or two adjacent steps. Compose into `ProvisioningNavigat
 
 ## Pre-built components
 
-`ErrorBanner`, `LoadingSpinner`, `SignalIcon`, `StatusBadge`, `StepIndicator`, `PasswordInput`, `ConfirmDialog`, `NetworkList`, `NetworkListItem`, `SavedNetworkList`, `SavedNetworkItem`, `DeviceListItem`, `ApSettings`, `VariableEditor`. Compose freely with custom UI.
+`ErrorBanner`, `LoadingSpinner`, `SignalIcon`, `StepIndicator`, `PasswordInput`, `ConfirmDialog`, `NetworkList`, `NetworkListItem`, `DeviceListItem`, `VariableEditor`. Compose freely with custom UI.
 
 ## Theming
 
@@ -299,18 +304,19 @@ Handles iOS (no-op + first-use dialog from Info.plist) and Android 12+/<12 (BLUE
 
 | Requirement | Value |
 |------|------|
-| BLE service UUID | `0000FFE0-0000-1000-8000-00805F9B34FB` |
-| Status characteristic | `0xFFE1` (Read, Notify) |
-| Command characteristic | `0xFFE2` (Write) |
-| Response characteristic | `0xFFE3` (Read, Notify) |
-| Default device name prefix | `ESP32-WiFi-` (override via `deviceNamePrefix`) |
-| Protocol | JSON command/response over GATT |
+| Firmware | `esp_wifi_config` 0.1.0+ with `CONFIG_WIFI_CFG_ENABLE_NETWORK_PROVISIONING=y` |
+| Protocol | ESP-IDF Wi-Fi/Network Provisioning manager (BLE scheme) |
+| Default GAP-name prefix | `PROV_` (override via `ble.deviceNamePrefix`) |
+| Default Security | 1 (Curve25519 + AES-CTR with PoP) |
+| Default PoP | `"abcd1234"` (override per device for production) |
 
-Full BLE protocol spec: [bluetooth-provisioning.md](./bluetooth-provisioning.md).
+The custom protocomm endpoints registered by the firmware
+(`esp-wifi-config-version`, `…-capabilities`, `…-vars`,
+`…-network-policy`) are exposed via `DeviceProtocol`.
 
 ## Architecture
 
-`BleTransport → DeviceProtocol → ConnectionPoller → ProvisioningManager → Zustand store → React hooks → screens`. See [ARCHITECTURE.md](./ARCHITECTURE.md).
+`BleTransport → DeviceProtocol → ProvisioningManager → Zustand store → React hooks → screens`. See [ARCHITECTURE.md](./ARCHITECTURE.md). The `BleTransport` and `DeviceProtocol` layers wrap the native SDK (`@orbital-systems/react-native-esp-idf-provisioning`) instead of speaking GATT directly.
 
 ## Development
 

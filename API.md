@@ -1,5 +1,22 @@
 # API Reference
 
+> **2.x notice — partial freshness.** This reference was authored
+> against the v1 custom-protocol surface. The step machine, error
+> envelope, store shape, and `useProvisioning` hook are unchanged in
+> v2, but `DeviceProtocol`, `BleTransport`, and the protocol commands
+> have been rewritten. Until this document is fully updated, prefer:
+>
+>   - [CLAUDE.md](./CLAUDE.md) for the v2 mental model and pitfalls
+>   - [CHANGELOG.md](./CHANGELOG.md) for the exhaustive v1 → v2 diff
+>   - the TypeScript types in `src/types/` for the source-of-truth shape
+>
+> Symbols documented here that are **NOT** in v2: `ConnectionPoller`,
+> `useWifiStatus`, `useSavedNetworks`, `useAccessPoint`, `StatusBadge`,
+> `ApSettings`, `SavedNetworkList`, `SavedNetworkItem`,
+> `DeviceProtocol.{getStatus,listNetworks,addNetwork,delNetwork,connectWifi,disconnectWifi,getApStatus,startAp,stopAp,factoryReset,sendCommand}`,
+> store fields `wifiState`/`wifiSsid`/`wifiIp`/`wifiRssi`/`wifiQuality`/`polling`,
+> error source `'poller'` (now `'provision'`).
+
 Exhaustive reference for every exported symbol. Generated manually so it stays curated for AI agents — every entry has a one-paragraph description, an example, and `@see` cross-references.
 
 For runnable examples see [examples/](./examples/). For task-oriented walkthroughs see [GUIDES/](./GUIDES/). For the mental model and pitfalls see [CLAUDE.md](./CLAUDE.md).

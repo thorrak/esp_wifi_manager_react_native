@@ -9,12 +9,12 @@ import type { ProvisioningStep } from '../types';
 export const SCREEN_NAMES = {
   Welcome: 'Welcome',
   Connect: 'Connect',
+  DeviceAuth: 'DeviceAuth',
   Configure: 'Configure',
   NetworkScan: 'NetworkScan',
   Credentials: 'Credentials',
   Joining: 'Joining',
   Success: 'Success',
-  Manage: 'Manage',
 } as const;
 
 export type ScreenName = (typeof SCREEN_NAMES)[keyof typeof SCREEN_NAMES];
@@ -22,6 +22,7 @@ export type ScreenName = (typeof SCREEN_NAMES)[keyof typeof SCREEN_NAMES];
 const STEP_TO_SCREEN: Record<ProvisioningStep, ScreenName> = {
   welcome: SCREEN_NAMES.Welcome,
   scanBle: SCREEN_NAMES.Connect,
+  enterDeviceAuth: SCREEN_NAMES.DeviceAuth,
   connectingBle: SCREEN_NAMES.Connect,
   configuring: SCREEN_NAMES.Configure,
   scanningWifi: SCREEN_NAMES.NetworkScan,
@@ -29,7 +30,6 @@ const STEP_TO_SCREEN: Record<ProvisioningStep, ScreenName> = {
   enterCredentials: SCREEN_NAMES.Credentials,
   joiningWifi: SCREEN_NAMES.Joining,
   success: SCREEN_NAMES.Success,
-  manage: SCREEN_NAMES.Manage,
 };
 
 /**

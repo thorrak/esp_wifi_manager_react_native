@@ -115,4 +115,25 @@ export interface BleTransportConfig {
   proofOfPossession?: string;
   /** SRP6a username for Security 2. Default: `"wificfg"`. */
   username?: string;
+  /**
+   * Force the wizard to insert an `enterDeviceAuth` step where the user
+   * enters the PoP (sec1) or SRP password + username (sec2) before
+   * connecting. When false (the default), the configured values above
+   * are used as-is and the auth step is skipped — unless the required
+   * fields are missing or a previous connect attempt was rejected as
+   * `unauthorized`, in which case the auth step is inserted regardless.
+   * Has no effect when `security === 0`.
+   */
+  promptForAuth?: boolean;
+}
+
+/**
+ * Per-flow auth credentials submitted from the `enterDeviceAuth` screen.
+ * Override the config-level defaults for one connect attempt.
+ */
+export interface DeviceAuthCredentials {
+  /** PoP (sec1) or SRP password (sec2). */
+  pop?: string;
+  /** SRP6a username (sec2 only). */
+  username?: string;
 }

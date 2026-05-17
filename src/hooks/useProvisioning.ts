@@ -37,6 +37,11 @@ export function useProvisioning() {
   const scannedNetworks = useProvisioningStore((s) => s.scannedNetworks);
   const selectedNetwork = useProvisioningStore((s) => s.selectedNetwork);
 
+  // -- Auth --
+  const authMode = useProvisioningStore((s) => s.authMode);
+  const defaultAuthValues = useProvisioningStore((s) => s.defaultAuthValues);
+  const pendingAuth = useProvisioningStore((s) => s.pendingAuth);
+
   // -- Action verbs (see ProvisioningManager for canonical descriptions) --
   const start = useProvisioningStore((s) => s.start);
   const chooseDevice = useProvisioningStore((s) => s.chooseDevice);
@@ -49,7 +54,7 @@ export function useProvisioning() {
   const pickDifferentNetwork = useProvisioningStore((s) => s.pickDifferentNetwork);
   const pickDifferentDevice = useProvisioningStore((s) => s.pickDifferentDevice);
   const cancel = useProvisioningStore((s) => s.cancel);
-  const goToManage = useProvisioningStore((s) => s.goToManage);
+  const submitDeviceAuth = useProvisioningStore((s) => s.submitDeviceAuth);
 
   return {
     // -- State --
@@ -62,6 +67,12 @@ export function useProvisioning() {
     device,
     scannedNetworks,
     selectedNetwork,
+    /** Which auth inputs the `enterDeviceAuth` screen should render. */
+    authMode,
+    /** Defaults from config to seed the auth screen. */
+    defaultAuthValues,
+    /** Last-submitted auth values (for pre-fill on unauthorized retry). */
+    pendingAuth,
 
     // -- Actions --
     start,
@@ -75,6 +86,6 @@ export function useProvisioning() {
     pickDifferentNetwork,
     pickDifferentDevice,
     cancel,
-    goToManage,
+    submitDeviceAuth,
   };
 }

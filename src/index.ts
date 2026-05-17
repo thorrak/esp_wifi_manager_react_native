@@ -23,6 +23,7 @@ export type {
   BleTransportConfig,
   BleTransportEvents,
   SecurityVersion,
+  DeviceAuthCredentials,
   // Protocol
   DeviceVersionInfo,
   DeviceCapabilities,
@@ -95,7 +96,11 @@ export {
 
 // ── Zustand Store ──
 export { useProvisioningStore } from './store';
-export type { ProvisioningStoreState, ProvisioningStoreActions } from './store';
+export type {
+  ProvisioningStoreState,
+  ProvisioningStoreActions,
+  DeviceAuthMode,
+} from './store';
 
 // ── React Hooks ──
 export { useProvisioning } from './hooks/useProvisioning';
@@ -122,12 +127,12 @@ export {
 export {
   WelcomeScreen,
   ConnectScreen,
+  DeviceAuthScreen,
   ConfigureScreen,
   NetworkScanScreen,
   CredentialsScreen,
   ConnectingScreen,
   SuccessScreen,
-  ManageScreen,
 } from './screens';
 
 // ── Navigation Utilities ──

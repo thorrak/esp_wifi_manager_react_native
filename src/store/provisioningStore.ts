@@ -23,6 +23,7 @@ import {
 } from '../serviceFactory';
 
 import type {
+  DeviceAuthCredentials,
   DeviceCapabilities,
   DeviceConnection,
   DeviceNetworkPolicy,
@@ -36,7 +37,18 @@ import type {
   ProvisionResult,
   ScanCompletedInfo,
   ScannedNetwork,
+  SecurityVersion,
 } from '../types';
+
+/**
+ * Which inputs the `enterDeviceAuth` screen should render. Derived from
+ * the resolved `security` version once services initialize.
+ *
+ *   - `null` — sec0; the screen is never shown.
+ *   - `'pop'` — sec1; single Proof-of-Possession field.
+ *   - `'srp'` — sec2; username + SRP-password fields.
+ */
+export type DeviceAuthMode = 'pop' | 'srp' | null;
 
 // ---------------------------------------------------------------------------
 // State
@@ -60,6 +72,14 @@ export interface ProvisioningStoreState {
   // -- WiFi --
   scannedNetworks: ScannedNetwork[];
   selectedNetwork: ScannedNetwork | null;
+
+  // -- Auth --
+  /** Which auth inputs the enterDeviceAuth screen should render. */
+  authMode: DeviceAuthMode;
+  /** Default values to seed the auth screen with (from config). */
+  defaultAuthValues: DeviceAuthCredentials;
+  /** Most recently submitted auth values (for pre-fill on unauthorized bounce). */
+  pendingAuth: DeviceAuthCredentials | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -83,7 +103,7 @@ export interface ProvisioningStoreActions {
   pickDifferentNetwork: () => Promise<void>;
   pickDifferentDevice: () => Promise<void>;
   cancel: () => Promise<void>;
-  goToManage: () => void;
+  submitDeviceAuth: (creds: DeviceAuthCredentials) => Promise<void>;
 
   // -- Direct protocol commands --
   scanWifi: () => Promise<ScannedNetwork[]>;
@@ -113,7 +133,17 @@ const initialState: ProvisioningStoreState = {
 
   scannedNetworks: [],
   selectedNetwork: null,
+
+  authMode: null,
+  defaultAuthValues: {},
+  pendingAuth: null,
 };
+
+function authModeForSecurity(security: SecurityVersion): DeviceAuthMode {
+  if (security === 1) return 'pop';
+  if (security === 2) return 'srp';
+  return null;
+}
 
 // ---------------------------------------------------------------------------
 // Subscription wiring
@@ -214,6 +244,16 @@ function subscribeToServices(set: SetState): void {
 function ensureInitialized(set: SetState, config?: ProvisioningConfig): void {
   initializeServices(config);
   subscribeToServices(set);
+  // Push the resolved auth shape into the store so screens can decide
+  // what to render without reaching into the transport themselves.
+  const t = getTransport().resolvedConfig;
+  set({
+    authMode: authModeForSecurity(t.security),
+    defaultAuthValues: {
+      pop: t.proofOfPossession,
+      username: t.username,
+    },
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -298,11 +338,17 @@ export const useProvisioningStore = create<
   cancel: async () => {
     ensureInitialized(set);
     await getManager().cancel();
+    set({ pendingAuth: null });
   },
 
-  goToManage: () => {
+  submitDeviceAuth: async (creds) => {
     ensureInitialized(set);
-    getManager().goToManage();
+    // Remember what the user typed so the screen can pre-fill on a
+    // possible unauthorized bounce — manager exposes its pending values
+    // too but the store-level snapshot avoids cross-layer coupling in
+    // selectors.
+    set({ pendingAuth: { ...creds } });
+    await getManager().submitDeviceAuth(creds);
   },
 
   // Direct protocol commands

@@ -29,7 +29,6 @@ export function SuccessScreen({ theme, onComplete }: SuccessScreenProps) {
     lastResult,
     lastProvisionResult,
     device,
-    goToManage,
     cancel,
   } = useProvisioning();
 
@@ -120,19 +119,6 @@ export function SuccessScreen({ theme, onComplete }: SuccessScreenProps) {
             Done
           </Text>
         </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[
-            styles.outlineButton,
-            { borderColor: c.primary, borderRadius },
-          ]}
-          onPress={goToManage}
-          activeOpacity={0.8}
-        >
-          <Text style={[styles.outlineButtonText, { color: c.primary }]}>
-            Manage Device
-          </Text>
-        </TouchableOpacity>
       </View>
     </View>
   );
@@ -205,16 +191,6 @@ const styles = StyleSheet.create({
   },
   primaryButtonText: {
     fontSize: 17,
-    fontWeight: '600',
-  },
-  outlineButton: {
-    width: '100%',
-    paddingVertical: 14,
-    alignItems: 'center',
-    borderWidth: 2,
-  },
-  outlineButtonText: {
-    fontSize: 16,
     fontWeight: '600',
   },
 });

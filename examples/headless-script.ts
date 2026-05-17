@@ -46,6 +46,10 @@ async function provisionFirstFound(ssid: string, password: string) {
   const target = discovered[0];
   console.log(`Connecting to ${target.name}…`);
   try {
+    // For a per-device PoP, pass it as the second argument instead of
+    // baking one into the BleTransport config:
+    //   await transport.connect(target.id, { pop: discoveredPop });
+    // For sec2 also supply { username } in the overrides object.
     await transport.connect(target.id);
   } catch (err) {
     if (err instanceof BleLibraryError) {

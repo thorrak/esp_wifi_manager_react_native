@@ -7,21 +7,22 @@ If you are an AI agent helping integrate or modify this library, read CLAUDE.md 
 ## Documentation
 
 - [CLAUDE.md](CLAUDE.md): Primary agent integration guide. Mental model, step machine table, action verbs, common pitfalls, file map. Read this first.
-- [README.md](README.md): Human-and-agent quick start. Decision tree, install steps, code examples for all three integration paths.
-- [API.md](API.md): Exhaustive symbol reference. Every export with signature and example. (Some sections are still being updated for v2; CLAUDE.md and README are current.)
-- [ARCHITECTURE.md](ARCHITECTURE.md): Internal layering and event flow. For contributors. (v1-shaped — see CLAUDE.md for the v2 layer model.)
-- [CHANGELOG.md](CHANGELOG.md): Version history. The v1 → v2 migration list lives here.
+- [README.md](README.md): Human-and-agent quick start. Decision tree, install steps, security-version handling, code examples for all three integration paths.
+- [API.md](API.md): Exhaustive symbol reference. Documents v1-era exports; the prelude lists every symbol removed in v2 — when there's conflict, prefer CLAUDE.md and the source.
+- [ARCHITECTURE.md](ARCHITECTURE.md): Historical v1 architecture doc. Retained for contributors who need to understand how the library evolved; v2's layering lives in CLAUDE.md.
+- [CHANGELOG.md](CHANGELOG.md): Version history. The v1 → v2 migration list lives here, plus the unreleased section for in-flight changes.
 
 ## Guides
 
-(Originally written against v1's custom-protocol surface; the v2 step machine is identical but the underlying transport and a number of action-verb method names differ. Cross-check against CHANGELOG.md when adapting.)
+(All guides updated for v2 — SDK-backed transport, atomic provision(), conditional enterDeviceAuth step, ProvisioningError sources include 'provision' not 'poller'.)
 
 - [GUIDES/01-quick-start.md](GUIDES/01-quick-start.md): Minimal Expo app from zero to provisioned device.
-- [GUIDES/02-custom-ui-with-hooks.md](GUIDES/02-custom-ui-with-hooks.md): Building a wizard from useProvisioning only.
+- [GUIDES/02-custom-ui-with-hooks.md](GUIDES/02-custom-ui-with-hooks.md): Building a wizard from useProvisioning only, including the enterDeviceAuth screen.
 - [GUIDES/03-headless-usage.md](GUIDES/03-headless-usage.md): BleTransport + DeviceProtocol in non-React code.
 - [GUIDES/04-pre-wifi-customization.md](GUIDES/04-pre-wifi-customization.md): Using onConnected to set hostname or app variables before WiFi.
-- [GUIDES/05-error-handling.md](GUIDES/05-error-handling.md): The unified ProvisioningError model in depth.
-- [GUIDES/07-testing-your-integration.md](GUIDES/07-testing-your-integration.md): Mocking transport for unit tests.
+- [GUIDES/05-error-handling.md](GUIDES/05-error-handling.md): The unified ProvisioningError model in depth, including the unauthorized-bounce path.
+- [GUIDES/06-managing-saved-networks.md](GUIDES/06-managing-saved-networks.md): Why post-provisioning management moved off BLE; HTTP/REST is the canonical surface.
+- [GUIDES/07-testing-your-integration.md](GUIDES/07-testing-your-integration.md): Mocking the native SDK for unit tests.
 
 ## Examples
 

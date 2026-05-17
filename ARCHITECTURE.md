@@ -2,22 +2,26 @@
 
 React Native library for BLE-based WiFi provisioning of ESP32 devices running `esp_wifi_config`. Provides both headless hooks and pre-built UI components.
 
-> **v2.0.0 update — partial freshness.** v2 wraps Espressif's native
-> ESP-IDF Network Provisioning SDK
-> (`@orbital-systems/react-native-esp-idf-provisioning`) instead of
-> driving raw GATT writes. The architecture is now **three** layers,
-> not four (`ConnectionPoller` is gone — the SDK's atomic `provision()`
-> replaces the polling loop). The step machine, store shape, and
-> action verbs are unchanged from v1.0. For the v2 mental model and
-> any places where this document conflicts with the code, prefer:
+> **Document status — historical.** This file documents the v1.x
+> internal architecture (custom 0xFFE0 GATT protocol, raw
+> `react-native-ble-plx` transport, in-process `ConnectionPoller`). It
+> is retained for context and for contributors who need to understand
+> how the library evolved, but **none of the GATT-level / wire-format
+> sections apply to v2.x**.
 >
->   - [CLAUDE.md](./CLAUDE.md) for the current layer model
+> v2 wraps Espressif's native ESP-IDF Network Provisioning SDK
+> (`@orbital-systems/react-native-esp-idf-provisioning`); the BLE
+> transport is now opaque from JS, there is no in-process poller (the
+> SDK's atomic `provision()` resolves on STA-connect), and a new
+> conditional `enterDeviceAuth` step prompts for PoP / SRP credentials
+> when configured to.
+>
+> For the current v2 mental model and the source of truth for the layer
+> model, step machine, types, and configuration shape, read:
+>
+>   - [CLAUDE.md](./CLAUDE.md)
 >   - [CHANGELOG.md](./CHANGELOG.md) for the v1 → v2 diff
->   - the source comments in `src/services/` and `src/types/`
->
-> v1 sections that describe BLE I/O details (GATT writes, JSON
-> reassembly, MTU negotiation, `react-native-ble-plx` adapter state)
-> are now handled by the native SDK and no longer apply.
+>   - source comments in `src/services/` and `src/types/`
 
 ---
 

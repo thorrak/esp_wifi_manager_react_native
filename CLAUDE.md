@@ -48,16 +48,22 @@ Every distinct UI state has its own step. Drive your UI off `step`; never derive
 |------|------|------|
 | `welcome` | Intro, "scan" CTA | `start()` |
 | `scanBle` | Device list, scanning indicator | tap a device → `chooseDevice(d)` |
-| `connectingBle` | Device list w/ spinner overlay | (auto: BLE handshake completes) |
+| `enterDeviceAuth` *(optional)* | PoP (sec1) or username + SRP password (sec2) input | `submitDeviceAuth({ pop?, username? })` |
+| `connectingBle` | Spinner overlay | (auto: BLE handshake completes) |
 | `configuring` | Pre-WiFi setup screen | `proceedFromConfigure()` (auto if no `onConnected`) |
 | `scanningWifi` | Loading spinner | (auto: WiFi scan completes) |
 | `chooseNetwork` | Network list | tap a network → `chooseNetwork(n)` |
-| `enterCredentials` | Password input | `submitPassword(pw)` |
-| `joiningWifi` | Joining progress + status | poller terminal event |
-| `success` | Result summary | `goToManage()` or done |
-| `manage` | Post-provision device tools | (terminal) |
+| `enterCredentials` | WiFi password input | `submitPassword(pw)` |
+| `joiningWifi` | Joining progress + status | SDK `provision()` resolves |
+| `success` | Result summary | terminal — user dismisses |
 
-Source: `src/types/provisioning.ts` → `ProvisioningStep`. Numbered steps via `STEP_NUMBERS` (sub-states share a number, so progress dots are stable).
+`enterDeviceAuth` is inserted between `scanBle` and `connectingBle` when:
+- `security !== 0` AND either `promptForAuth: true` in config, OR the required credentials (`proofOfPossession` for sec1; `proofOfPossession` + `username` for sec2) aren't pre-configured; OR
+- the previous `connectingBle` attempt was rejected with `error.code === 'unauthorized'` — the screen then re-renders with the last-entered values so the user can fix a typo.
+
+The `manage` step from earlier v2 drafts is gone. The firmware tears down BLE on successful provisioning (and, with `reboot_on_provisioning_success`, reboots the device shortly after), so there is no BLE link left to manage anything from. Post-provisioning device management should go over your device's HTTP API.
+
+Source: `src/types/provisioning.ts` → `ProvisioningStep`. Numbered steps via `STEP_NUMBERS` (sub-states share a number, so progress dots are stable). `enterDeviceAuth` shares dot 1 with `scanBle`/`connectingBle`.
 
 ## The action verbs — 1:1 with user intent
 
@@ -66,7 +72,8 @@ Source: `src/types/provisioning.ts` → `ProvisioningStep`. Numbered steps via `
 | Verb | Effect |
 |------|------|
 | `start()` | welcome → scanBle, starts BLE scan |
-| `chooseDevice(target)` | scanBle → connectingBle → configuring → scanningWifi → chooseNetwork |
+| `chooseDevice(target)` | scanBle → (enterDeviceAuth* OR connectingBle → configuring → scanningWifi → chooseNetwork) |
+| `submitDeviceAuth({ pop?, username? })` | enterDeviceAuth → connectingBle (uses overrides instead of config defaults; bounces back to enterDeviceAuth on unauthorized) |
 | `proceedFromConfigure()` | configuring → scanningWifi → chooseNetwork |
 | `chooseNetwork(network)` | chooseNetwork → enterCredentials |
 | `backToNetworks()` | enterCredentials → chooseNetwork |
@@ -75,7 +82,6 @@ Source: `src/types/provisioning.ts` → `ProvisioningStep`. Numbered steps via `
 | `pickDifferentNetwork()` | joiningWifi → chooseNetwork (deletes the failed network) |
 | `pickDifferentDevice()` | any step → scanBle (disconnects, scans again) |
 | `cancel()` | any step → welcome (full reset, preserves `lastResult`) |
-| `goToManage()` | success → manage |
 | `rescanWifi()` | rerun WiFi scan from chooseNetwork |
 
 ## The state shape — what `useProvisioning` returns
@@ -90,6 +96,9 @@ Source: `src/types/provisioning.ts` → `ProvisioningStep`. Numbered steps via `
   device,             // DeviceConnection | null   ← discriminated union
   scannedNetworks,    // ScannedNetwork[]
   selectedNetwork,    // ScannedNetwork | null
+  authMode,           // 'pop' | 'srp' | null  ← what DeviceAuthScreen renders
+  defaultAuthValues,  // { pop?, username? }   ← seeds for the auth screen
+  pendingAuth,        // { pop?, username? } | null  ← last-submitted values
   // …action verbs
 }
 ```
@@ -202,8 +211,9 @@ type ProvisioningConfig = {
     deviceNamePrefix?: string | string[];   // default 'PROV_'
     scanTimeoutMs?: number;                  // default 10000
     security?: 0 | 1 | 2;                    // default 1
-    proofOfPossession?: string;              // default 'abcd1234'
+    proofOfPossession?: string;              // default 'abcd1234' (sec1 PoP, sec2 SRP password)
     username?: string;                       // sec2 only, default 'wificfg'
+    promptForAuth?: boolean;                 // default false — force the enterDeviceAuth screen
   };
   protocol?: {
     defaultTimeoutMs?: number;               // default 8000
@@ -217,16 +227,20 @@ type ProvisioningConfig = {
 };
 ```
 
+### Security versions in one paragraph
+
+Default is **Security 1** (X25519 + AES-CTR + PoP) with PoP `"abcd1234"` — matches the firmware's Kconfig default. For **Security 0** (no encryption), set `ble.security: 0`; no PoP/username needed. For **Security 2** (SRP6a + AES-GCM), set `ble.security: 2` and either pre-configure `proofOfPossession` (SRP password) + `username`, or set `promptForAuth: true` so users enter both in the wizard. Set `promptForAuth: true` whenever each device has a unique PoP/credentials (e.g. printed on a label) and you don't want to ship one app per device.
+
 Pass to `<ProvisioningNavigator config={...} />` or `initializeServices(config)` once before any hook usage.
 
 ## File map (where to look for each concern)
 
 - Step machine, types, config: `src/types/provisioning.ts`
-- BLE protocol details: `bluetooth-provisioning.md`
-- Manager logic: `src/services/ProvisioningManager.ts`
+- BLE transport (SDK wrapper + auth overrides): `src/services/BleTransport.ts`
+- Manager logic (incl. auth gating + unauthorized bounce): `src/services/ProvisioningManager.ts`
 - Store wiring: `src/store/provisioningStore.ts`
 - Primary hook: `src/hooks/useProvisioning.ts`
-- Pre-built screens: `src/screens/`
+- Pre-built screens: `src/screens/` (note `DeviceAuthScreen.tsx` is the auth UI)
 - Pre-built navigator: `src/navigation/ProvisioningNavigator.tsx`
 - Permissions helper: `src/utils/permissions.ts`
 

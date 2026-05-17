@@ -1,5 +1,51 @@
 # Changelog
 
+## Unreleased
+
+### Breaking
+
+- **Removed the `manage` step, `ManageScreen`, and the `goToManage()`
+  action verb.** Once the device joins WiFi the firmware tears down BLE
+  (and, with the firmware's `reboot_on_provisioning_success` enabled,
+  reboots shortly afterwards) — there is no BLE link left to manage
+  anything from. Post-provisioning device management goes through the
+  device's HTTP/REST API on the WiFi network. `useProvisioning()` no
+  longer returns `goToManage`. The `manage` value is removed from
+  `ProvisioningStep`, `STEP_NUMBERS`, and the navigation screen map.
+
+### Added
+
+- **Optional user-entered device auth.** New `enterDeviceAuth` step,
+  `DeviceAuthScreen`, and `submitDeviceAuth({ pop?, username? })` verb
+  let apps prompt users for per-device credentials at runtime instead
+  of baking them into the app config. Inserted between `scanBle` and
+  `connectingBle` when the new `ble.promptForAuth: true` flag is set,
+  when the required credentials are missing from config, or when a
+  previous connect attempt was rejected as `unauthorized` — in which
+  case the screen pre-fills the last-entered values so the user can
+  fix a typo without re-scanning.
+- New `useProvisioning()` selectors: `authMode` (`'pop' | 'srp' | null`,
+  derived from `ble.security`), `defaultAuthValues` (`{ pop?, username? }`
+  seeded from config), and `pendingAuth` (last-submitted values).
+- `BleTransport.connect(deviceId, overrides?)` now accepts per-call
+  `{ pop, username }` overrides that take precedence over the
+  config-level defaults.
+- New `BleTransportConfig.promptForAuth?: boolean` (default `false`).
+- New exported types: `DeviceAuthCredentials`, `DeviceAuthMode`.
+- New exported screen: `DeviceAuthScreen` (and `DeviceAuthScreenProps`).
+
+### Documentation
+
+- Deleted the stale `bluetooth-provisioning.md` (described the v1
+  custom 0xFFE0 protocol that no longer exists).
+- `ARCHITECTURE.md` re-banner: it's now explicitly a historical v1
+  document; consult `CLAUDE.md` for the current v2 model.
+- `GUIDES/06-managing-saved-networks.md` rewritten — the manage step
+  is gone, the page now explains that post-provisioning management
+  belongs on the HTTP API.
+- `README.md` adds a Security versions section and refreshed
+  configuration / step machine sections.
+
 ## 2.0.0 — 2026-05-10
 
 ESP-IDF Network Provisioning over BLE (matches `esp_wifi_config` 0.1.0+).

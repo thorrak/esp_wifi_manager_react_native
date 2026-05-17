@@ -8,8 +8,8 @@
 
 ```ts
 type ProvisioningError = {
-  source: 'ble' | 'protocol' | 'poller' | 'flow';
-  code?: string;        // e.g. 'unauthorized', 'connection_failed'
+  source: 'ble' | 'protocol' | 'provision' | 'flow';
+  code?: string;        // e.g. 'unauthorized', 'provision_failed'
   message: string;      // for direct UI display
   recoverable: boolean; // user can retry from same step
 };
@@ -21,24 +21,25 @@ type ProvisioningError = {
 
 | Source | When | Recoverable? |
 |------|------|------|
-| `ble` | BLE adapter / scan / connect failure | Sometimes (e.g. `connection_lost: false`, scan retry: `true`) |
-| `protocol` | Command rejected by the device, JSON parse error, command timeout | Usually `true` |
-| `poller` | WiFi join failed (`connection_failed`) or timed out (`connection_timeout`) | Always `true` |
-| `flow` | `onConnected` callback threw, no network selected, etc. | Usually `true` |
+| `ble` | BLE adapter / scan / connect / session-init failure | Sometimes — `unauthorized` is recoverable (bounces to `enterDeviceAuth`); `connection_lost` mid-flow is not |
+| `protocol` | Device rejected a custom-endpoint call, JSON parse error, command timeout | Usually `true` |
+| `provision` | The SDK's atomic `provision()` rejected — wrong WiFi password, AP not in range, STA-connect timeout | Usually `true` |
+| `flow` | `onConnected` callback threw, missing required PoP/credentials, no network selected, etc. | Usually `true` |
 
 ## Codes
 
 | Code | Source | Meaning |
 |------|------|------|
-| `unauthorized` | ble | User denied Bluetooth permission |
-| `powered_off` | ble | Bluetooth is turned off |
-| `unsupported` | ble | BLE not supported on this device |
-| `adapter_timeout` | ble | BLE adapter didn't reach PoweredOn within 10s |
-| `scan_error` | ble | Scan API returned an error |
-| `connection_lost` | ble | Mid-flow BLE disconnect (not on success/manage) |
-| `connection_failed` | poller | Saw connecting → disconnected; bad password or AP not in range |
-| `connection_timeout` | poller | Polled for full timeout without seeing a terminal state |
-| `no_network` | flow | `submitPassword` called with no `selectedNetwork` |
+| `unauthorized` | `ble` | Either OS-level Bluetooth permission denial OR a rejected protocomm handshake (wrong PoP / SRP credentials). The wizard bounces back to `enterDeviceAuth` so the user can correct the credentials. |
+| `powered_off` | `ble` | Bluetooth is turned off |
+| `unsupported` | `ble` | BLE not supported on this device |
+| `scan_error` | `ble` | Scan API returned an error |
+| `connect_error` | `ble` | Generic BLE connect failure not classified as `unauthorized` |
+| `connection_lost` | `ble` | Mid-flow BLE disconnect on a step other than `success` |
+| `provision_failed` | `provision` | The SDK's `provision()` rejected — typically a wrong WiFi password or the AP being unreachable |
+| `no_network` | `flow` | `submitPassword` called with no `selectedNetwork` |
+| `no_device` | `flow` | `submitDeviceAuth` called with no pending device target |
+| `missing_pop` | `flow` | `submitDeviceAuth` called without a required PoP/SRP password |
 
 `code` is optional — generic protocol errors don't have one.
 
@@ -78,8 +79,11 @@ if (step === 'joiningWifi' && error?.recoverable) {
   return (
     <View>
       <Text>{error.message}</Text>
-      <Button onPress={retryJoin}>Try again</Button>
-      <Button onPress={pickDifferentNetwork}>Pick a different network</Button>
+      {/* retryJoin() with no argument bounces back to enterCredentials
+          so the user can re-enter the password. Pass a string to re-use
+          the same password. */}
+      <Button onPress={() => void retryJoin()}>Try again</Button>
+      <Button onPress={() => void pickDifferentNetwork()}>Pick a different network</Button>
     </View>
   );
 }
@@ -88,10 +92,27 @@ if (error && !error.recoverable) {
   return (
     <View>
       <Text>{error.message}</Text>
-      <Button onPress={cancel}>Start over</Button>
+      <Button onPress={() => void cancel()}>Start over</Button>
     </View>
   );
 }
+```
+
+### Unauthorized on `enterDeviceAuth`
+
+When the protocomm handshake rejects the credentials, the wizard bounces back to `enterDeviceAuth` and the screen pre-fills the last-entered values (via `useProvisioning().pendingAuth`). The recommended flow is to render the error banner above the form and let the user fix the typo:
+
+```tsx
+case 'enterDeviceAuth':
+  return (
+    <DeviceAuthForm
+      errorMessage={
+        error?.code === 'unauthorized'
+          ? 'Authentication rejected. Check the values and try again.'
+          : error?.message
+      }
+    />
+  );
 ```
 
 ## Error lifecycle

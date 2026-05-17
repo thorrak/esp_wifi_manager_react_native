@@ -49,7 +49,7 @@ config={{
   flow: {
     onConnected: async ({ protocol }) => {
       const current = await protocol.getVar('mdns_name');
-      if (!current.value) {
+      if (!current?.value) {
         const suggested = `my-app-${Math.random().toString(36).slice(2, 7)}`;
         await protocol.setVar('mdns_name', suggested);
       }
@@ -121,13 +121,15 @@ Then your custom configure screen calls `resolveProceed()` when the user is done
 
 ## Recipe — validate firmware version
 
+The `esp-wifi-config-version` endpoint surfaces `lib` (library version), `idf` (ESP-IDF version), `fw_version` (app version), and `app` (project name). Read it via `protocol.getVersion()`:
+
 ```ts
 config={{
   flow: {
     onConnected: async ({ protocol }) => {
-      const v = await protocol.getVar('fw_version');
-      if (!v.value || semverLt(v.value, '2.0.0')) {
-        throw new Error('Device firmware too old. Update to 2.0.0+ before provisioning.');
+      const v = await protocol.getVersion();
+      if (!v.fw_version || semverLt(v.fw_version, '2.0.0')) {
+        throw new Error(`Device firmware ${v.fw_version ?? 'unknown'} too old. Update to 2.0.0+ before provisioning.`);
       }
     },
   },

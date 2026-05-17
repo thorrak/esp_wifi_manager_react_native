@@ -1,6 +1,6 @@
 # Building a custom wizard with hooks
 
-**When to use this:** you want full control over the UI but don't want to re-implement the BLE state machine, command protocol, or polling logic.
+**When to use this:** you want full control over the UI but don't want to re-implement the BLE state machine, the SDK-driven provision flow, or the conditional device-auth step.
 
 **What you'll end up with:** a single screen component that renders different content per `step` and calls action verbs to advance the flow.
 
@@ -13,6 +13,7 @@ switch (step) {
   case 'welcome': return <Intro />;
   case 'scanBle':
   case 'connectingBle': return <DeviceList />;
+  case 'enterDeviceAuth': return <DeviceAuthForm />;
   case 'configuring': return <ConfiguringSpinner />;
   case 'scanningWifi':
   case 'chooseNetwork': return <NetworkList />;
@@ -23,6 +24,8 @@ switch (step) {
 ```
 
 Each branch renders one screen. The library drives the transitions; you tell it when to act.
+
+`enterDeviceAuth` only appears when `ble.security !== 0` AND credentials are not pre-configured (or `ble.promptForAuth: true`, or you're bouncing back from an `unauthorized` error). For the default sec1-with-default-PoP flow it's skipped entirely.
 
 ## Wiring the wizard
 
@@ -38,7 +41,12 @@ import {
 } from 'esp-wifi-config-react-native';
 
 const CONFIG = {
-  ble: { deviceNamePrefix: ['MyDevice-'] },
+  ble: {
+    deviceNamePrefix: ['MyDevice-'],
+    security: 1,
+    proofOfPossession: 'abcd1234',
+    // promptForAuth: true,   // uncomment for per-device PoPs
+  },
 };
 
 export default function WifiSetupScreen() {
@@ -51,10 +59,11 @@ export default function WifiSetupScreen() {
   const {
     step, error, device,
     scannedNetworks, selectedNetwork,
-    wifiSsid, wifiIp,
-    start, chooseDevice, chooseNetwork,
+    lastResult, lastProvisionResult,
+    authMode, defaultAuthValues, pendingAuth,
+    start, chooseDevice, submitDeviceAuth, chooseNetwork,
     submitPassword, retryJoin, pickDifferentNetwork,
-    pickDifferentDevice, cancel,
+    pickDifferentDevice, cancel, backToNetworks,
   } = useProvisioning();
   const { discoveredDevices, scanning } = useDeviceScanner();
 
@@ -103,6 +112,41 @@ function DeviceList({ devices, scanning, device, onPick }) {
 
 `device.status === 'connecting'` is your spinner-overlay flag. Same for `step === 'scanningWifi'` → render a loading state inside the network list screen.
 
+## Building the `enterDeviceAuth` screen
+
+```tsx
+function DeviceAuthForm() {
+  const { authMode, defaultAuthValues, pendingAuth, submitDeviceAuth, error } =
+    useProvisioning();
+  const [pop, setPop] = useState(pendingAuth?.pop ?? defaultAuthValues.pop ?? '');
+  const [username, setUsername] = useState(
+    pendingAuth?.username ?? defaultAuthValues.username ?? '',
+  );
+
+  if (authMode === null) return null; // sec0 — should never get here
+
+  return (
+    <View>
+      {error?.code === 'unauthorized' && (
+        <Text>Authentication rejected, try again.</Text>
+      )}
+      {authMode === 'srp' && (
+        <TextInput value={username} onChangeText={setUsername} placeholder="Username" />
+      )}
+      <TextInput
+        value={pop}
+        onChangeText={setPop}
+        secureTextEntry
+        placeholder={authMode === 'srp' ? 'SRP password' : 'PoP code'}
+      />
+      <Button title="Connect" onPress={() => void submitDeviceAuth({ pop, username })} />
+    </View>
+  );
+}
+```
+
+Pre-fill from `pendingAuth` first (covers the unauthorized-bounce case) then `defaultAuthValues` (covers `promptForAuth: true` with a known-good fleet PoP).
+
 ## Error display
 
 Single field, single render path:
@@ -118,7 +162,7 @@ Single field, single render path:
 )}
 ```
 
-`error.recoverable` lets you decide whether to show a "Retry" button or a "Start over" button. Joining-wifi failures (`source: 'poller'`) are recoverable; BLE permission denials (`source: 'ble'`, `code: 'unauthorized'`) are not.
+`error.recoverable` lets you decide whether to show a "Retry" button or a "Start over" button. `source: 'provision'` errors (e.g. wrong WiFi password) are usually recoverable; `source: 'ble'` with `code: 'connection_lost'` is not.
 
 ## Back / cancel handling
 
@@ -128,6 +172,7 @@ const onBack = async () => {
     case 'welcome': router.back(); return;
     case 'scanBle':
     case 'connectingBle': await cancel(); router.back(); return;
+    case 'enterDeviceAuth': await pickDifferentDevice(); return;
     case 'configuring':
     case 'scanningWifi':
     case 'chooseNetwork': await pickDifferentDevice(); return;
@@ -138,8 +183,7 @@ const onBack = async () => {
         { text: 'Cancel', onPress: () => void cancel() },
       ]);
       return;
-    case 'success':
-    case 'manage': await cancel(); router.back(); return;
+    case 'success': await cancel(); router.back(); return;
   }
 };
 ```
@@ -154,14 +198,14 @@ The verbs map directly to user intent; the back-button is just a dispatch table.
 case 'success':
   return (
     <View>
-      <Text>Connected to {lastResult?.ssid ?? wifiSsid}</Text>
-      <Text>IP: {lastResult?.ip ?? wifiIp}</Text>
+      <Text>Connected to {lastResult?.ssid}</Text>
+      <Text>Status: {lastProvisionResult?.status ?? lastResult?.provisionStatus}</Text>
       <Button onPress={() => void cancel()}>Done</Button>
     </View>
   );
 ```
 
-The device drops BLE shortly after a successful join; reading `wifiSsid`/`wifiIp` directly will return empty after that, but `lastResult` stays populated.
+The device drops BLE shortly after a successful join (and, with the firmware's `reboot_on_provisioning_success` enabled, reboots), so post-success BLE-side reads will fail. The device's IP isn't surfaced over BLE — query it via mDNS or your firmware's HTTP API once the device is on the WiFi network.
 
 ## Complete example
 
@@ -170,5 +214,6 @@ See [examples/custom-wizard.tsx](../examples/custom-wizard.tsx) for a full worki
 ## Don't
 
 - Don't derive booleans like `busy && !networks.length` to figure out "are we scanning". The step IS the phase.
-- Don't read `wifiSsid` on the success screen if you can read `lastResult.ssid`.
+- Don't read non-existent fields like `wifiSsid`/`wifiIp` from `useProvisioning()` — those were removed in v2. Use `lastResult` / `lastProvisionResult` instead.
 - Don't `await cancel()` and then immediately `router.back()` if `cancel()` is on a path that itself navigates — pick one.
+- Don't reach into `getTransport()` or `getProtocol()` from a screen to figure out the security version. Use `authMode` from `useProvisioning()`.

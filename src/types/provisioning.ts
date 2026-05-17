@@ -10,10 +10,16 @@
  *   - Credentials are exchanged via the SDK's atomic `provision()` call,
  *     which both sends credentials and waits for the device to attempt
  *     STA-connect — no separate poller stage.
- *   - There's no `manage` step that exposes saved-network / AP / factory
- *     reset operations: those endpoints don't exist in the new firmware
- *     protocol. A simplified post-success `manage` step now only exposes
- *     the device-variable editor (custom protocomm endpoint).
+ *   - There is no `manage` step. The firmware tears down BLE on
+ *     successful provisioning (and, with `reboot_on_provisioning_success`
+ *     enabled, reboots the device shortly after) — so there's no BLE
+ *     link to manage anything from. Post-provisioning device management
+ *     happens over the device's HTTP API.
+ *   - A conditional `enterDeviceAuth` step prompts the user for the PoP
+ *     (Security 1) or username + SRP password (Security 2) when those
+ *     credentials are not configured up front, or when `promptForAuth`
+ *     is set, or when a previous connect attempt was rejected as
+ *     unauthorized.
  */
 
 import type { ScannedNetwork, ProvisionResult } from './wifi';
@@ -37,8 +43,9 @@ import type { BleTransport } from '../services/BleTransport';
 export type ProvisioningStep =
   // Pre-flow
   | 'welcome'
-  // Picking a device
+  // Picking and authenticating a device
   | 'scanBle'
+  | 'enterDeviceAuth'
   | 'connectingBle'
   // Optional pre-WiFi customization (auto-skipped if config.flow.onConnected absent)
   | 'configuring'
@@ -49,12 +56,12 @@ export type ProvisioningStep =
   | 'enterCredentials'
   | 'joiningWifi'
   // Terminal
-  | 'success'
-  | 'manage';
+  | 'success';
 
 export const PROVISIONING_STEP_ORDER: ProvisioningStep[] = [
   'welcome',
   'scanBle',
+  'enterDeviceAuth',
   'connectingBle',
   'configuring',
   'scanningWifi',
@@ -67,6 +74,9 @@ export const PROVISIONING_STEP_ORDER: ProvisioningStep[] = [
 export const STEP_NUMBERS: Record<ProvisioningStep, number | null> = {
   welcome: null,
   scanBle: 1,
+  // Sub-state of "select & authenticate a device" — shares dot 1
+  // so progress doesn't gain a phantom column for an optional screen.
+  enterDeviceAuth: 1,
   connectingBle: 1,
   configuring: 2,
   scanningWifi: 3,
@@ -74,7 +84,6 @@ export const STEP_NUMBERS: Record<ProvisioningStep, number | null> = {
   enterCredentials: 4,
   joiningWifi: 5,
   success: null,
-  manage: null,
 };
 
 export const VISIBLE_STEP_COUNT = 5;

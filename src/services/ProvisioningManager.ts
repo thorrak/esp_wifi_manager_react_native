@@ -14,6 +14,7 @@
 import type {
   BleConnectionState,
   ConnectedDeviceInfo,
+  DeviceAuthCredentials,
   DeviceConnection,
   DiscoveredDevice,
   OnConnectedCallback,
@@ -76,13 +77,24 @@ function toErrorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-/** Steps where an unexpected BLE disconnect should NOT raise an error. */
+/**
+ * Steps where an unexpected BLE disconnect should NOT raise an error.
+ *
+ * `joiningWifi` is deliberately NOT in this set, but the success path
+ * still survives: the SDK's atomic `provision()` resolves as soon as
+ * the device reports STA-connected, which moves the step to `success`
+ * (which IS safe). Firmware configured with `stop_provisioning_on_connect`
+ * or `reboot_on_provisioning_success` will drop BLE shortly afterwards,
+ * but by then we're already on `success` and the disconnect handler
+ * no-ops. If a future firmware change shortens that gap to zero, this
+ * assumption breaks and `joiningWifi` would need to be safe too.
+ */
 const DISCONNECT_SAFE_STEPS: ReadonlySet<ProvisioningStep> = new Set<ProvisioningStep>([
   'welcome',
   'scanBle',
+  'enterDeviceAuth',
   'connectingBle',
   'success',
-  'manage',
 ]);
 
 // ---------------------------------------------------------------------------
@@ -99,6 +111,18 @@ export class ProvisioningManager extends TypedEventEmitter<ProvisioningManagerEv
   private _scannedNetworks: ScannedNetwork[] = [];
   private _device: DeviceConnection = null;
   private _error: ProvisioningError | null = null;
+
+  // Held across the chooseDevice → enterDeviceAuth → connectingBle path so
+  // the auth-screen submission and unauthorized-retry bounce don't have to
+  // re-discover the target.
+  private _pendingDevice: DiscoveredDevice | null = null;
+  // Per-flow auth overrides captured from `enterDeviceAuth` and re-passed
+  // on retry so the screen can pre-fill the last entered values.
+  private _pendingAuth: DeviceAuthCredentials | null = null;
+  // Sticky once a connect attempt has been rejected as unauthorized — forces
+  // the auth screen to render on the next chooseDevice even if the config
+  // would normally skip it. Cleared on successful connect or cancel.
+  private _forceAuthPrompt = false;
 
   private unsubscribeFns: Array<() => void> = [];
 
@@ -156,16 +180,130 @@ export class ProvisioningManager extends TypedEventEmitter<ProvisioningManagerEv
       rssi: target.rssi,
     };
     this.emit('deviceConnectionChanged', this._device);
-    this.setStep('connectingBle');
+    this._pendingDevice = target;
 
     this.transport.stopScan();
     await delay(DISCONNECT_SETTLE_MS);
 
+    if (this.shouldPromptForAuth()) {
+      // Park on enterDeviceAuth and wait for submitDeviceAuth() to drive
+      // the actual connect. Don't reset _pendingAuth — if we're here as
+      // an unauthorized retry, the screen will pre-fill the last values.
+      this.setStep('enterDeviceAuth');
+      return;
+    }
+
+    // Skipping the auth screen — fall through with no per-flow overrides
+    // so the transport uses its configured defaults.
+    this._pendingAuth = null;
+    await this._connectAfterAuth();
+  }
+
+  /**
+   * Submit per-flow device auth credentials captured from the
+   * `enterDeviceAuth` screen. Stores them as overrides for the upcoming
+   * connect attempt and advances to `connectingBle`.
+   *
+   * Required fields vary by security version:
+   *   - sec1: `pop`
+   *   - sec2: `pop` (SRP password) + `username`
+   *
+   * If `username` is omitted for sec2, falls back to the configured default.
+   */
+  async submitDeviceAuth(creds: DeviceAuthCredentials): Promise<void> {
+    if (this._step !== 'enterDeviceAuth') {
+      log.warn('submitDeviceAuth called outside enterDeviceAuth step:', this._step);
+      return;
+    }
+    if (!this._pendingDevice) {
+      this.setError({
+        source: 'flow',
+        code: 'no_device',
+        message: 'No device selected',
+        recoverable: false,
+      });
+      return;
+    }
+
+    const security = this.transport.resolvedConfig.security;
+    if (security === 1) {
+      if (!creds.pop) {
+        this.setError({
+          source: 'flow',
+          code: 'missing_pop',
+          message: 'Proof of Possession is required',
+          recoverable: true,
+        });
+        return;
+      }
+      this._pendingAuth = { pop: creds.pop };
+    } else if (security === 2) {
+      if (!creds.pop) {
+        this.setError({
+          source: 'flow',
+          code: 'missing_pop',
+          message: 'Password is required',
+          recoverable: true,
+        });
+        return;
+      }
+      this._pendingAuth = {
+        pop: creds.pop,
+        // Fall back to the configured default username if the screen
+        // didn't override it.
+        username: creds.username ?? this.transport.resolvedConfig.username,
+      };
+    } else {
+      // sec0 shouldn't have reached this screen, but accept the no-op.
+      this._pendingAuth = null;
+    }
+
+    this.clearError();
+    await this._connectAfterAuth();
+  }
+
+  /**
+   * Perform the BLE connect with whatever auth overrides are currently
+   * pending and continue into `configuring` / `scanningWifi` on success.
+   * On unauthorized failure, bounce back to `enterDeviceAuth` so the
+   * user can correct the credentials without re-scanning.
+   */
+  private async _connectAfterAuth(): Promise<void> {
+    const target = this._pendingDevice;
+    if (!target) {
+      log.error('_connectAfterAuth with no pending device');
+      this.setStep('scanBle');
+      return;
+    }
+    this.setStep('connectingBle');
+
     let info: ConnectedDeviceInfo;
     try {
-      info = await this.transport.connect(target.id);
+      info = await this.transport.connect(
+        target.id,
+        this._pendingAuth ?? undefined,
+      );
     } catch (err) {
       const code = err instanceof BleLibraryError ? err.code : undefined;
+
+      if (code === 'unauthorized') {
+        // Stay locked into the auth screen on subsequent chooseDevice
+        // calls until the user successfully connects.
+        this._forceAuthPrompt = true;
+        this._device = null;
+        this.emit('deviceConnectionChanged', null);
+        this.setError({
+          source: 'ble',
+          code,
+          message: toErrorMessage(err),
+          recoverable: true,
+        });
+        this.setStep('enterDeviceAuth');
+        return;
+      }
+
+      this._pendingDevice = null;
+      this._pendingAuth = null;
       this._device = null;
       this.emit('deviceConnectionChanged', null);
       this.setError({
@@ -177,6 +315,10 @@ export class ProvisioningManager extends TypedEventEmitter<ProvisioningManagerEv
       this.setStep('scanBle');
       return;
     }
+
+    // Successful connect — clear the auth-retry latch and pending state.
+    this._forceAuthPrompt = false;
+    this._pendingDevice = null;
 
     this._device = {
       status: 'connected',
@@ -204,6 +346,28 @@ export class ProvisioningManager extends TypedEventEmitter<ProvisioningManagerEv
     }
 
     await this.proceedFromConfigure();
+  }
+
+  /**
+   * Returns true when the wizard should park on `enterDeviceAuth` before
+   * calling connect(). Driven by config + previous-unauthorized state.
+   */
+  private shouldPromptForAuth(): boolean {
+    const { security, proofOfPossession, username, promptForAuth } =
+      this.transport.resolvedConfig;
+    if (security === 0) return false;
+    if (this._forceAuthPrompt) return true;
+    if (promptForAuth) return true;
+    if (security === 1) {
+      return !proofOfPossession;
+    }
+    // sec2: needs pop (SRP password) + username
+    return !proofOfPossession || !username;
+  }
+
+  /** Currently-pending auth values (for screens that want to pre-fill). */
+  get pendingAuth(): DeviceAuthCredentials | null {
+    return this._pendingAuth;
   }
 
   async proceedFromConfigure(): Promise<void> {
@@ -342,6 +506,9 @@ export class ProvisioningManager extends TypedEventEmitter<ProvisioningManagerEv
     this._scannedNetworks = [];
     this._device = null;
     this._error = null;
+    this._pendingDevice = null;
+    this._pendingAuth = null;
+    this._forceAuthPrompt = false;
 
     try {
       await this.transport.disconnect();
@@ -355,11 +522,6 @@ export class ProvisioningManager extends TypedEventEmitter<ProvisioningManagerEv
     this.emit('scannedNetworksUpdated', []);
     this.emit('deviceConnectionChanged', null);
     this.emit('errorChanged', null);
-  }
-
-  goToManage(): void {
-    log.info('goToManage');
-    this.setStep('manage');
   }
 
   // -----------------------------------------------------------------------

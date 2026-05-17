@@ -159,12 +159,14 @@ Full version: `examples/custom-wizard.tsx`. Step-by-step walkthrough: `GUIDES/02
 ## The step machine
 
 ```
-welcome → scanBle ⇄ connectingBle → configuring → scanningWifi ⇄ chooseNetwork
-                                                                       ↓
-                                       success ← joiningWifi ← enterCredentials
-                                          ↓
-                                        manage
+welcome → scanBle → [enterDeviceAuth] → connectingBle → configuring
+                                                            ↓
+                            scanningWifi ⇄ chooseNetwork
+                                                ↓
+                       success ← joiningWifi ← enterCredentials
 ```
+
+`enterDeviceAuth` only appears when the wizard needs to collect PoP (Security 1) or username + SRP password (Security 2) credentials before connecting — see [Security versions](#security-versions) below.
 
 Adjacent sub-steps share a screen (e.g. `scanBle`/`connectingBle` both render the device list); the granularity exists so spinner overlays, button states, and progress copy are deterministic. See [CLAUDE.md](./CLAUDE.md) for the full mapping table.
 
@@ -175,7 +177,8 @@ Adjacent sub-steps share a screen (e.g. `scanBle`/`connectingBle` both render th
 | Verb | Use from step | Goes to |
 |------|------|------|
 | `start()` | any | scanBle |
-| `chooseDevice(d)` | scanBle | connectingBle → … → chooseNetwork |
+| `chooseDevice(d)` | scanBle | enterDeviceAuth OR connectingBle → … → chooseNetwork |
+| `submitDeviceAuth({ pop?, username? })` | enterDeviceAuth | connectingBle (bounces back on unauthorized) |
 | `proceedFromConfigure()` | configuring | scanningWifi → chooseNetwork |
 | `chooseNetwork(n)` | chooseNetwork | enterCredentials |
 | `backToNetworks()` | enterCredentials | chooseNetwork |
@@ -184,20 +187,25 @@ Adjacent sub-steps share a screen (e.g. `scanBle`/`connectingBle` both render th
 | `pickDifferentNetwork()` | joiningWifi | chooseNetwork (deletes failed network) |
 | `pickDifferentDevice()` | any | scanBle |
 | `cancel()` | any | welcome |
-| `goToManage()` | success | manage |
 | `rescanWifi()` | chooseNetwork | scanningWifi → chooseNetwork |
 
 ## Configuration
 
 ```ts
 type ProvisioningConfig = {
-  ble?: BleTransportConfig;        // scan timeout, MTU, deviceNamePrefix
-  protocol?: DeviceProtocolConfig; // command timeouts
-  poller?: { intervalMs?; timeoutMs? };
+  ble?: {
+    deviceNamePrefix?: string | string[];   // default 'PROV_'
+    scanTimeoutMs?: number;                  // default 10000
+    security?: 0 | 1 | 2;                    // default 1
+    proofOfPossession?: string;              // default 'abcd1234' (sec1 PoP, sec2 SRP password)
+    username?: string;                       // sec2 only, default 'wificfg'
+    promptForAuth?: boolean;                 // default false — see Security versions below
+  };
+  protocol?: { defaultTimeoutMs?: number; endpointTimeouts?: Record<string, number> };
   flow?: {
-    onConnected?: (ctx) => Promise<void>; // pre-WiFi customization
-    defaultNetworkPriority?: number;       // default 10
-    autoConnectOpenNetworks?: boolean;     // default true
+    onConnected?: (ctx) => Promise<void>;    // pre-WiFi customization
+    autoConnectOpenNetworks?: boolean;       // default true
+    provisionTimeoutMs?: number;             // default 60000
   };
 };
 ```
@@ -220,12 +228,27 @@ config={{
 
 See `GUIDES/04-pre-wifi-customization.md` for the full pattern.
 
+## Security versions
+
+The library defaults to **Security 1** (X25519 + AES-CTR + PoP) with PoP `abcd1234` — matches the firmware's Kconfig defaults. If you ship a single PoP across your fleet and bake it into the app, no extra UI is needed.
+
+| Firmware setting | Library config | UI behavior |
+|---|---|---|
+| Security 0 (no encryption) | `ble: { security: 0 }` | No auth screen ever shown. |
+| Security 1 (PoP), fleet-wide PoP | `ble: { security: 1, proofOfPossession: '...' }` | No auth screen. |
+| Security 1 (PoP), per-device PoP | `ble: { security: 1, promptForAuth: true }` | Wizard inserts a screen where the user enters the PoP. |
+| Security 2 (SRP6a) | `ble: { security: 2, proofOfPossession: '...', username: '...' }` (or set `promptForAuth: true` to ask the user) | Auth screen renders username + SRP password fields when prompting. |
+
+`promptForAuth: true` is the right choice when each device has unique credentials printed on a label, packaged in a QR code, or otherwise out of the app's static knowledge. On an `unauthorized` rejection the wizard bounces back to the auth screen with the last-entered values pre-filled so the user can fix a typo without re-scanning.
+
+For Security 2 specifically: the SDK's connect call takes `(pop, _, username)`, so `proofOfPossession` is reused as the SRP password.
+
 ## Error handling
 
 Single envelope, no field-merging:
 ```ts
 type ProvisioningError = {
-  source: 'ble' | 'protocol' | 'poller' | 'flow';
+  source: 'ble' | 'protocol' | 'provision' | 'flow';
   code?: string;
   message: string;
   recoverable: boolean;
@@ -262,12 +285,12 @@ Each screen renders one or two adjacent steps. Compose into `ProvisioningNavigat
 |------|------|
 | `WelcomeScreen` | welcome |
 | `ConnectScreen` | scanBle, connectingBle |
+| `DeviceAuthScreen` | enterDeviceAuth |
 | `ConfigureScreen` | configuring |
 | `NetworkScanScreen` | scanningWifi, chooseNetwork |
 | `CredentialsScreen` | enterCredentials |
 | `ConnectingScreen` | joiningWifi |
 | `SuccessScreen` | success |
-| `ManageScreen` | manage |
 
 ## Pre-built components
 

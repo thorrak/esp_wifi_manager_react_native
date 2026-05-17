@@ -27,6 +27,7 @@ import {
 import type {
   BleConnectionState,
   ConnectedDeviceInfo,
+  DeviceAuthCredentials,
   DiscoveredDevice,
   BleTransportEvents,
   BleTransportConfig,
@@ -52,6 +53,7 @@ interface ResolvedConfig {
   security: SecurityVersion;
   proofOfPossession: string;
   username: string;
+  promptForAuth: boolean;
 }
 
 function normalizePrefixes(input?: string | string[]): string[] {
@@ -66,6 +68,7 @@ function resolveConfig(config?: BleTransportConfig): ResolvedConfig {
     security: config?.security ?? 1,
     proofOfPossession: config?.proofOfPossession ?? DEFAULT_POP,
     username: config?.username ?? DEFAULT_SECURITY2_USERNAME,
+    promptForAuth: config?.promptForAuth ?? false,
   };
 }
 
@@ -261,10 +264,18 @@ export class BleTransport extends TypedEventEmitter<BleTransportEvents> {
    * the protocomm session-init handshake (Security 0/1/2 negotiation,
    * PoP / SRP exchange).
    *
+   * `overrides` lets the caller supply per-flow credentials (typically
+   * captured from a UI prompt) that take precedence over the values
+   * configured at construction time. Useful for the `enterDeviceAuth`
+   * wizard step and for unauthorized-retry flows.
+   *
    * Returns a `ConnectedDeviceInfo` describing the active device. Throws
    * a `BleLibraryError` on failure.
    */
-  async connect(deviceId: string): Promise<ConnectedDeviceInfo> {
+  async connect(
+    deviceId: string,
+    overrides?: DeviceAuthCredentials,
+  ): Promise<ConnectedDeviceInfo> {
     log.info('Connecting to device:', deviceId);
 
     // Stop any active scan before connecting.
@@ -280,17 +291,27 @@ export class BleTransport extends TypedEventEmitter<BleTransportEvents> {
       security: toEspSecurity(this.config.security),
     });
 
+    const pop = overrides?.pop ?? this.config.proofOfPossession;
+    const username =
+      this.config.security === 2
+        ? overrides?.username ?? this.config.username
+        : null;
+
     try {
-      const username =
-        this.config.security === 2 ? this.config.username : null;
-      await device.connect(this.config.proofOfPossession, null, username);
+      await device.connect(pop, null, username);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       log.error('Connect failed:', message);
       this._device = null;
       this._connectedDeviceInfo = null;
       this.setConnectionState('disconnected');
-      const code: 'unauthorized' | 'connect_error' = /unauth/i.test(message)
+      // Heuristic — the native SDK surfaces a variety of strings for
+      // failed handshakes; anything that looks like an auth/PoP/SRP
+      // failure is treated as 'unauthorized' so the manager can bounce
+      // back to the auth step instead of cancelling the whole flow.
+      const code: 'unauthorized' | 'connect_error' = /unauth|pop|proof|verifier|invalid (?:password|credential)/i.test(
+        message,
+      )
         ? 'unauthorized'
         : 'connect_error';
       throw new BleLibraryError(code, `BLE connect error: ${message}`);

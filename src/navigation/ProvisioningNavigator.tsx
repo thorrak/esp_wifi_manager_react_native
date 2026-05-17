@@ -22,7 +22,7 @@ import { ConfigureScreen } from '../screens/ConfigureScreen';
 import { ConnectScreen } from '../screens/ConnectScreen';
 import { ConnectingScreen } from '../screens/ConnectingScreen';
 import { CredentialsScreen } from '../screens/CredentialsScreen';
-import { ManageScreen } from '../screens/ManageScreen';
+import { DeviceAuthScreen } from '../screens/DeviceAuthScreen';
 import { NetworkScanScreen } from '../screens/NetworkScanScreen';
 import { SuccessScreen } from '../screens/SuccessScreen';
 import { WelcomeScreen } from '../screens/WelcomeScreen';
@@ -61,12 +61,12 @@ export function useNavigatorContext() {
 export type RootStackParamList = {
   [SCREEN_NAMES.Welcome]: undefined;
   [SCREEN_NAMES.Connect]: undefined;
+  [SCREEN_NAMES.DeviceAuth]: undefined;
   [SCREEN_NAMES.Configure]: undefined;
   [SCREEN_NAMES.NetworkScan]: undefined;
   [SCREEN_NAMES.Credentials]: undefined;
   [SCREEN_NAMES.Joining]: undefined;
   [SCREEN_NAMES.Success]: undefined;
-  [SCREEN_NAMES.Manage]: undefined;
 };
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
@@ -148,6 +148,11 @@ function ConnectScreenWrapper() {
   return <ConnectScreen theme={theme} />;
 }
 
+function DeviceAuthScreenWrapper() {
+  const { theme } = useNavigatorContext();
+  return <DeviceAuthScreen theme={theme} />;
+}
+
 function ConfigureScreenWrapper() {
   const { theme } = useNavigatorContext();
   return <ConfigureScreen theme={theme} />;
@@ -178,11 +183,6 @@ function SuccessScreenWrapper() {
   };
 
   return <SuccessScreen theme={theme} onComplete={handleComplete} />;
-}
-
-function ManageScreenWrapper() {
-  const { theme } = useNavigatorContext();
-  return <ManageScreen theme={theme} />;
 }
 
 // ---------------------------------------------------------------------------
@@ -341,6 +341,11 @@ export function ProvisioningNavigator({
               options={{ title: 'Select Device' }}
             />
             <Stack.Screen
+              name={SCREEN_NAMES.DeviceAuth}
+              component={DeviceAuthScreenWrapper}
+              options={{ title: 'Device Authentication' }}
+            />
+            <Stack.Screen
               name={SCREEN_NAMES.Configure}
               component={ConfigureScreenWrapper}
               options={{ title: 'Configure Device' }}
@@ -364,11 +369,6 @@ export function ProvisioningNavigator({
               name={SCREEN_NAMES.Success}
               component={SuccessScreenWrapper}
               options={{ title: 'Connected' }}
-            />
-            <Stack.Screen
-              name={SCREEN_NAMES.Manage}
-              component={ManageScreenWrapper}
-              options={{ title: 'Manage Device' }}
             />
           </Stack.Navigator>
         </NavigationContainer>

@@ -1,152 +1,60 @@
 # Post-provision device management
 
-> **v2.x note.** This guide is largely superseded. ESP-IDF Network
-> Provisioning over BLE only exposes a small set of custom protocomm
-> endpoints (`esp-wifi-config-version`, `…-capabilities`,
-> `…-vars`, `…-network-policy`) — saved-network management, SoftAP
-> control, and factory reset all moved to the device's HTTP API once
-> it's on the network. The BLE-side hooks `useSavedNetworks` and
-> `useAccessPoint` were removed in v2.0.0; only `useDeviceVariables`
-> remains, plus the new `useDeviceProtocol().getVersion / getCapabilities
-> / getNetworkPolicy` for read-only diagnostics.
->
-> For HTTP-side device management on the WiFi network see the firmware's
-> REST API documentation at https://configwifi.com/docs/api/rest-api.
+In v2 the library no longer exposes a BLE-based "manage" screen, and the
+old `useSavedNetworks` / `useAccessPoint` hooks are gone. The reason is
+structural: once the device joins WiFi, the firmware tears down its BLE
+provisioning service (and, with `reboot_on_provisioning_success`,
+reboots the device shortly afterwards) — so there is no BLE link left
+to issue management commands over.
 
-**When to use this (v1):** after a successful provision, you want to let the user view/delete saved networks, change the soft-AP, edit app variables, or factory-reset the device — all over the existing BLE connection.
+The library does still surface the four read-mostly custom protocomm
+endpoints **during** the provisioning session (between BLE connect and
+the device dropping BLE on success):
 
-**What you'll end up with (v1):** a "manage" screen that uses `useSavedNetworks`, `useAccessPoint`, and `useDeviceVariables` to interact with the device.
+- `getVersion()` — firmware/library/IDF versions
+- `getCapabilities()` — enabled feature flags
+- `getNetworkPolicy()` — retry/reconnect configuration
+- `getVar()` / `setVar()` / `listVars()` / `delVar()` — custom variable
+  store, intended for app-side configuration
 
-## Prereq — being on the `manage` step
+The intended place to call these is **`flow.onConnected`** (runs after
+BLE connect, before the WiFi scan) — see
+[04-pre-wifi-customization.md](./04-pre-wifi-customization.md).
 
-The wizard transitions to `manage` only when you call `goToManage()` from `success`. Pre-built `SuccessScreen` includes a "Manage Device" button that does this.
+## Managing the device after WiFi joins
 
-```tsx
-const { step, goToManage } = useProvisioning();
-if (step === 'success') return <Success onManage={goToManage} />;
-if (step === 'manage') return <ManageScreen />;
+The firmware's HTTP/REST API on the WiFi network is the canonical
+surface for post-provisioning management. From your mobile app, talk to
+it the same way you would any LAN-side device:
+
+```ts
+const ip = await resolveMdns('my-device.local');
+const res = await fetch(`http://${ip}/api/wifi/networks`);
 ```
 
-## Saved networks
+See your firmware's REST API documentation for the available endpoints.
+The library has no opinions about how you do this — `fetch`, `axios`,
+React Query, whatever fits your app.
 
-```tsx
-import { useSavedNetworks } from 'esp-wifi-config-react-native';
+## Headless one-shot management from JS (advanced)
 
-function SavedNetworksList() {
-  const { networks, loading, error, deleteNetwork, fetchNetworks } =
-    useSavedNetworks(); // auto-fetches on mount
+If you need to push custom variables alongside credentials and don't
+want to wait for the WiFi-side path, you can drive
+`DeviceProtocol.setVar()` headlessly between connect and provision:
 
-  if (loading && networks.length === 0) return <Spinner />;
-  if (error) return <Text>{error}</Text>;
+```ts
+import { BleTransport, DeviceProtocol } from 'esp-wifi-config-react-native';
 
-  return (
-    <FlatList
-      data={networks}
-      keyExtractor={n => n.ssid}
-      renderItem={({ item }) => (
-        <View>
-          <Text>{item.ssid}</Text>
-          <Text>priority: {item.priority}</Text>
-          <Button onPress={() => deleteNetwork(item.ssid)}>Delete</Button>
-        </View>
-      )}
-      onRefresh={fetchNetworks}
-      refreshing={loading}
-    />
-  );
-}
+const transport = new BleTransport({ security: 1, proofOfPossession: 'abcd1234' });
+const protocol = new DeviceProtocol(transport);
+
+await transport.startScan();
+await transport.connect('PROV_AB12CD', { pop: 'abcd1234' });
+await protocol.setVar('mdns_name', 'my-device');
+const r = await protocol.provision('MyWifi', 'wifipassword');
+// transport will likely drop shortly after this resolves
+await transport.disconnect();
 ```
 
-`useSavedNetworks` auto-fetches on mount. `deleteNetwork` re-fetches after deletion to keep the list in sync.
-
-## Soft access point
-
-```tsx
-import { useAccessPoint } from 'esp-wifi-config-react-native';
-
-function ApPanel() {
-  const { apStatus, startAp, stopAp, loading, error } = useAccessPoint();
-
-  return (
-    <View>
-      {error && <Text>{error}</Text>}
-      <Text>AP active: {apStatus?.active ? 'yes' : 'no'}</Text>
-      <Text>SSID: {apStatus?.ssid}</Text>
-      <Text>Connected stations: {apStatus?.sta_count}</Text>
-      <Button
-        onPress={() => apStatus?.active ? stopAp() : startAp()}
-        disabled={loading}
-      >
-        {apStatus?.active ? 'Stop AP' : 'Start AP'}
-      </Button>
-    </View>
-  );
-}
-```
-
-Pass custom AP settings via `startAp({ ssid: 'MyAP', password: 'secret' })`.
-
-## Device variables
-
-For application config (mDNS name, MQTT broker, custom keys):
-
-```tsx
-import { useDeviceVariables } from 'esp-wifi-config-react-native';
-
-function HostnameEditor() {
-  const { getVariable, setVariable, loading, error } = useDeviceVariables();
-  const [name, setName] = useState('');
-
-  useEffect(() => {
-    void (async () => {
-      const v = await getVariable('mdns_name');
-      if (v) setName(v.value);
-    })();
-  }, [getVariable]);
-
-  return (
-    <View>
-      {error && <Text>{error}</Text>}
-      <TextInput value={name} onChangeText={setName} editable={!loading} />
-      <Button
-        onPress={async () => { await setVariable('mdns_name', name); }}
-        disabled={loading}
-      >
-        Save
-      </Button>
-    </View>
-  );
-}
-```
-
-`getVariable` returns `DeviceVariable | null` (null on error). `setVariable` returns `boolean` (true on success). `loading` reflects ANY in-flight call from this hook instance.
-
-## Factory reset
-
-```tsx
-import { useDeviceProtocol } from 'esp-wifi-config-react-native';
-
-function FactoryReset() {
-  const { factoryReset, loading } = useDeviceProtocol();
-
-  const onPress = async () => {
-    Alert.alert(
-      'Reset device?',
-      'All saved networks and settings will be cleared.',
-      [
-        { text: 'Cancel' },
-        { text: 'Reset', style: 'destructive', onPress: () => void factoryReset() },
-      ],
-    );
-  };
-
-  return <Button onPress={onPress} disabled={loading}>Factory Reset</Button>;
-}
-```
-
-The device drops BLE shortly after `factory_reset` — the wizard's mid-flow disconnect detector will fire. To prevent that, call `cancel()` immediately after queueing the factory reset, OR transition to a screen that doesn't care about BLE state.
-
-## Don't
-
-- Don't build a manage screen that also tries to advance the wizard. Manage is a terminal branch off `success`.
-- Don't keep `useSavedNetworks` mounted on screens that don't need it — it auto-fetches on mount.
+(Headless usage is documented in
+[03-headless-usage.md](./03-headless-usage.md).)

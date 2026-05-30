@@ -1,9 +1,8 @@
 # Post-provision device management
 
-In v2 the library no longer exposes a BLE-based "manage" screen, and the
-old `useSavedNetworks` / `useAccessPoint` hooks are gone. The reason is
-structural: once the device joins WiFi, the firmware tears down its BLE
-provisioning service (and, with `reboot_on_provisioning_success`,
+The library does not expose a BLE-based "manage" screen or saved-network /
+access-point hooks. The reason is structural: once the device joins WiFi,
+the firmware tears down its BLE provisioning service (and, by default,
 reboots the device shortly afterwards) — so there is no BLE link left
 to issue management commands over.
 

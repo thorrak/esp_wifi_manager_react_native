@@ -1,15 +1,16 @@
 /**
  * Zustand store — bridges the service layers into React.
  *
- * v2 differences from v1:
- *   - No `polling` / WiFi-state fields. The SDK's atomic provision() call
- *     replaces the poller, so the store no longer carries `wifiState`,
- *     `wifiSsid`, `wifiIp`, `wifiRssi`, `wifiQuality`, `polling`.
+ * Notes:
+ *   - No `polling` / live WiFi-state fields. The SDK's atomic provision()
+ *     call is the only join mechanism, so the store carries no `wifiState`,
+ *     `wifiSsid`, `wifiIp`, `wifiRssi`, `wifiQuality`, or `polling`.
  *   - No `addNetwork` / `delNetwork` / `connectWifi` / `disconnectWifi`
  *     / `getApStatus` / `startAp` / `stopAp` / `factoryReset` actions —
- *     those endpoints don't exist in the new firmware protocol.
- *   - New: `getVersion`, `getCapabilities`, `getNetworkPolicy`,
- *     `listVars`, `delVar` actions for the custom protocomm endpoints.
+ *     those are not part of the BLE provisioning protocol (use the device's
+ *     HTTP API for post-join management).
+ *   - Custom protocomm endpoints surface as `getVersion`, `getCapabilities`,
+ *     `getNetworkPolicy`, `listVars`, `delVar` actions.
  */
 
 import { create } from 'zustand';

@@ -1,5 +1,5 @@
 // ===========================================================================
-// esp-wifi-config-react-native — public surface (v2).
+// esp-wifi-config-react-native — public surface.
 // ---------------------------------------------------------------------------
 // AI-agent guidance: when integrating, prefer the high-level surface
 // (`useProvisioning` + pre-built screens) unless you specifically need
@@ -7,9 +7,9 @@
 // types/provisioning.ts → `ProvisioningStep`. The action verbs returned
 // from `useProvisioning()` map 1:1 to ProvisioningManager methods.
 //
-// v2 wraps Espressif's official iOS / Android provisioning SDK
-// (@orbital-systems/react-native-esp-idf-provisioning) instead of speaking
-// the deleted custom JSON-over-GATT protocol directly.
+// The library wraps Espressif's official iOS / Android provisioning SDK
+// (@orbital-systems/react-native-esp-idf-provisioning) rather than speaking
+// GATT directly.
 // ===========================================================================
 
 // ── Types ──

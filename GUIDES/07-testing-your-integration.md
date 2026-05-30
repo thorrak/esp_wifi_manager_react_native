@@ -190,4 +190,4 @@ await manager.submitDeviceAuth({ pop: 'right' });
 - Don't try to test against real BLE in unit tests. Use the SDK mock or stub the transport.
 - Don't assert on internal state (`manager['_step']`). Use the public getters or `stepChanged` events.
 - Don't forget `useProvisioningStore.getState().destroy()` between tests if you used `initialize()`.
-- Don't set the obsolete `polling`/`wifiState`/`wifiIp`/`wifiRssi` store fields in your test fixtures — they no longer exist in v2.
+- The store has no `polling`/`wifiState`/`wifiIp`/`wifiRssi` fields — don't add them to test fixtures.

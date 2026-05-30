@@ -1,12 +1,11 @@
 /**
  * BLE-related types for ESP-IDF Network Provisioning.
  *
- * The transport now wraps `@orbital-systems/react-native-esp-idf-provisioning`
- * (which in turn wraps Espressif's native iOS / Android SDKs). The events
- * exposed here mirror the v1 transport API as closely as possible so the
- * surrounding store / hooks / screens continue to work — but the
- * underlying mechanism is fundamentally different (no live discovery
- * stream, no GATT writes from JS, no JSON reassembly).
+ * The transport wraps `@orbital-systems/react-native-esp-idf-provisioning`
+ * (which in turn wraps Espressif's native iOS / Android SDKs). The native
+ * layer does the BLE I/O, so there is no live discovery stream, no GATT
+ * writes from JS, and no JSON reassembly at this level — the events below
+ * model what the SDK actually surfaces.
  */
 
 export type BleErrorCode =
@@ -54,9 +53,8 @@ export interface ConnectedDeviceInfo {
   id: string;
   name: string;
   /**
-   * Reported negotiated MTU. Always `null` for the SDK transport — the
-   * native layer manages MTU internally and doesn't surface it. Kept on
-   * the type so the store/UI shape stays stable from v1.
+   * Reported negotiated MTU, when the platform surfaces it. The native SDK
+   * manages MTU internally and does not expose it, so this is `null` there.
    */
   mtu: number | null;
 }
@@ -71,8 +69,8 @@ export interface ScanCompletedInfo {
    */
   total: number;
   /**
-   * Names of non-matching devices seen during the scan. Always empty for
-   * the SDK transport — kept for shape compatibility with v1.
+   * Sample of matched device names, for diagnostics. The native SDK
+   * transport does not populate this, so it is empty there.
    */
   sampleNames: string[];
 }

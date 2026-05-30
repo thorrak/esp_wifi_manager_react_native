@@ -1,11 +1,10 @@
 /**
  * BLE-related constants for ESP-IDF Network Provisioning.
  *
- * The previous custom 0xFFE0 GATT service is gone — wifi_prov_mgr derives
- * its BLE service UUID from a per-device prefix (default 16-byte UUID,
- * configurable via CONFIG_WIFI_CFG_NETWORK_PROVISIONING_SERVICE_PREFIX).
- * The Espressif native SDK handles the BLE I/O for us, so we no longer
- * expose any GATT UUIDs from this library.
+ * wifi_prov_mgr derives its BLE service UUID from a per-device prefix
+ * (default 16-byte UUID, configurable via
+ * CONFIG_WIFI_CFG_NETWORK_PROVISIONING_SERVICE_PREFIX). The Espressif
+ * native SDK handles the BLE I/O, so this library exposes no GATT UUIDs.
  */
 
 /** Default BLE GAP-name prefix that wifi_prov_scheme_ble advertises with. */

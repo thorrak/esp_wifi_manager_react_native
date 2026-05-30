@@ -60,3 +60,4 @@ package-lock.json
 # Misc
 *.tgz
 .cache/
+harness/

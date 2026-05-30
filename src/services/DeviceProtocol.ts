@@ -11,7 +11,7 @@
  * `ESPDevice.sendData()` which handles base64 framing and protocomm
  * encryption. The SDK serialises requests internally — there is no need
  * for our own busy flag, but we still surface a `busyChanged` event for
- * UI affordances and to keep the v1 hook contract.
+ * UI affordances.
  */
 
 import {

@@ -214,6 +214,6 @@ See [examples/custom-wizard.tsx](../examples/custom-wizard.tsx) for a full worki
 ## Don't
 
 - Don't derive booleans like `busy && !networks.length` to figure out "are we scanning". The step IS the phase.
-- Don't read non-existent fields like `wifiSsid`/`wifiIp` from `useProvisioning()` — those were removed in v2. Use `lastResult` / `lastProvisionResult` instead.
+- `useProvisioning()` does not expose live Wi-Fi fields like `wifiSsid`/`wifiIp`. Use `lastResult` / `lastProvisionResult` for the outcome, and fetch the device IP out of band (mDNS or the firmware's HTTP API).
 - Don't `await cancel()` and then immediately `router.back()` if `cancel()` is on a path that itself navigates — pick one.
 - Don't reach into `getTransport()` or `getProtocol()` from a screen to figure out the security version. Use `authMode` from `useProvisioning()`.

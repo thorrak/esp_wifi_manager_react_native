@@ -1,166 +1,38 @@
 # Changelog
 
-## Unreleased
+## 1.0.0 — unreleased
 
-### Breaking
+Initial release. React Native library for provisioning Wi-Fi credentials onto an ESP32 over BLE
+using ESP-IDF's official Network/Wi-Fi Provisioning protocol, via the
+[`@orbital-systems/react-native-esp-idf-provisioning`](https://www.npmjs.com/package/@orbital-systems/react-native-esp-idf-provisioning)
+native SDK. Targets [`esp_wifi_config`](https://github.com/thorrak/esp_wifi_config) 0.1.0+ firmware
+with `CONFIG_WIFI_CFG_ENABLE_NETWORK_PROVISIONING=y`.
 
-- **Removed the `manage` step, `ManageScreen`, and the `goToManage()`
-  action verb.** Once the device joins WiFi the firmware tears down BLE
-  (and, with the firmware's `reboot_on_provisioning_success` enabled,
-  reboots shortly afterwards) — there is no BLE link left to manage
-  anything from. Post-provisioning device management goes through the
-  device's HTTP/REST API on the WiFi network. `useProvisioning()` no
-  longer returns `goToManage`. The `manage` value is removed from
-  `ProvisioningStep`, `STEP_NUMBERS`, and the navigation screen map.
+### Architecture
 
-### Added
-
-- **Optional user-entered device auth.** New `enterDeviceAuth` step,
-  `DeviceAuthScreen`, and `submitDeviceAuth({ pop?, username? })` verb
-  let apps prompt users for per-device credentials at runtime instead
-  of baking them into the app config. Inserted between `scanBle` and
-  `connectingBle` when the new `ble.promptForAuth: true` flag is set,
-  when the required credentials are missing from config, or when a
-  previous connect attempt was rejected as `unauthorized` — in which
-  case the screen pre-fills the last-entered values so the user can
-  fix a typo without re-scanning.
-- New `useProvisioning()` selectors: `authMode` (`'pop' | 'srp' | null`,
-  derived from `ble.security`), `defaultAuthValues` (`{ pop?, username? }`
-  seeded from config), and `pendingAuth` (last-submitted values).
-- `BleTransport.connect(deviceId, overrides?)` now accepts per-call
-  `{ pop, username }` overrides that take precedence over the
-  config-level defaults.
-- New `BleTransportConfig.promptForAuth?: boolean` (default `false`).
-- New exported types: `DeviceAuthCredentials`, `DeviceAuthMode`.
-- New exported screen: `DeviceAuthScreen` (and `DeviceAuthScreenProps`).
-
-### Documentation
-
-- Deleted the stale `bluetooth-provisioning.md` (described the v1
-  custom 0xFFE0 protocol that no longer exists).
-- `ARCHITECTURE.md` re-banner: it's now explicitly a historical v1
-  document; consult `CLAUDE.md` for the current v2 model.
-- `GUIDES/06-managing-saved-networks.md` rewritten — the manage step
-  is gone, the page now explains that post-provisioning management
-  belongs on the HTTP API.
-- `README.md` adds a Security versions section and refreshed
-  configuration / step machine sections.
-- Documented the Security 2 device-side salt/verifier requirement and
-  the firmware reboot-vs-poll race across `README.md`, `CLAUDE.md`,
-  `GUIDES/05-error-handling.md`, and `bluetooth_spec.md` (§18).
-
-### Fixed
-
-- **`joiningWifi` is now disconnect-safe — fixes false provisioning
-  failures.** The `esp_wifi_config` firmware reboots on a successful
-  provision and drops BLE as soon as the client disconnects after
-  seeing "connected", which can race the resolution of the SDK's atomic
-  `provision()`. Previously a BLE disconnect observed while on
-  `joiningWifi` raised `connection_lost` and cancelled the flow,
-  clobbering a provision that had actually succeeded. `joiningWifi` is
-  now in `DISCONNECT_SAFE_STEPS`; the real outcome is taken from the
-  `provision()` promise. Verified end-to-end on iOS hardware across
-  Security 0/1/2. (Pairs with a firmware-side fix raising the
-  reboot-on-success backstop 3 s → 15 s; see `bluetooth_spec.md` §18.2.)
-- **Custom protocomm endpoints no longer send a zero-length write.**
-  `DeviceProtocol`'s read-only helpers (`getVersion`, `getCapabilities`,
-  `getNetworkPolicy`) sent an empty request body, which the ESP32
-  protocomm BLE transport does not dispatch to a handler — the device
-  returned nothing and the call threw "Empty response". Empty requests
-  are now sent as `{}`. See `bluetooth_spec.md` §12 and §18.5.
-
-## 2.0.0 — 2026-05-10
-
-ESP-IDF Network Provisioning over BLE (matches `esp_wifi_config` 0.1.0+).
-
-### Breaking
-
-- **The custom 0xFFE0 GATT protocol is gone.** This release talks to
-  Espressif's official Wi-Fi Provisioning manager via the
-  `@orbital-systems/react-native-esp-idf-provisioning` native SDK
-  (which itself wraps Espressif's iOS / Android SDKs). The previous
-  raw `react-native-ble-plx` + JSON-over-GATT path is removed.
-- **Peer dependency change**: `react-native-ble-plx` is replaced by
-  `@orbital-systems/react-native-esp-idf-provisioning` (>=0.5.0).
-  Update your project's `package.json` and re-run pod install.
-- **Default scan prefix changed**: `"ESP32-WiFi-"` → `"PROV_"` (matches
-  the firmware's `CONFIG_WIFI_CFG_NETWORK_PROVISIONING_SERVICE_PREFIX`
-  Kconfig default). Override via `ProvisioningConfig.ble.deviceNamePrefix`.
-- **New `BleTransportConfig.security` / `proofOfPossession` / `username`
-  fields** — required for the protocomm session-init handshake. The
-  defaults (Security 1, PoP `"abcd1234"`) match the firmware's Kconfig
-  defaults; production fleets MUST override per device.
-- **Removed protocol commands** (no longer exposed by firmware over BLE):
-  `getStatus`, `listNetworks`, `addNetwork`, `delNetwork`, `connectWifi`,
-  `disconnectWifi`, `getApStatus`, `startAp`, `stopAp`, `factoryReset`.
-  Wi-Fi management for these still exists — just over the device's
-  HTTP API once it's on the network. The wizard's WiFi-credential
-  exchange now goes through the SDK's atomic `provision()` call.
-- **No `ConnectionPoller`.** The SDK's `provision()` resolves on
-  STA-connect success or rejects on failure, so the joiningWifi step
-  awaits that promise directly. The `polling`, `wifiState`, `wifiSsid`,
-  `wifiIp`, `wifiRssi`, `wifiQuality` fields are gone from the store
-  and `useProvisioning()` return value.
-- **Removed hooks**: `useWifiStatus`, `useSavedNetworks`, `useAccessPoint`.
-  Removed components: `StatusBadge`, `ApSettings`, `SavedNetworkList`,
-  `SavedNetworkItem`. The `manage` step is now a minimal device-info +
-  variable-editor screen.
-- **Error source renamed**: `ProvisioningError.source = 'poller'` →
-  `'provision'`. The `'flow'`/`'ble'`/`'protocol'` sources are unchanged.
-
-### Added
-
-- `DeviceProtocol.getVersion()`, `getCapabilities()`, `getNetworkPolicy()`
-  — wrap the new firmware custom protocomm endpoints
-  (`esp-wifi-config-version`, `…-capabilities`, `…-network-policy`).
-- `DeviceProtocol.listVars()`, `delVar()` — alongside the existing
-  `getVar`/`setVar`, now backed by the `esp-wifi-config-vars` endpoint.
-- `DeviceProtocol.scanWifi()` and `provision()` — typed wrappers around
-  the SDK's `scanWifiList()` and `provision()`.
-- `BleTransport.espDevice` getter — exposes the underlying SDK device
-  for advanced flows.
-- New types: `SecurityVersion`, `DeviceVersionInfo`, `DeviceCapabilities`,
-  `DeviceNetworkPolicy`, `VarsRequest`, `VarsResponse`, `ProvisionResult`.
-
-### Migration notes
-
-- Replace the `react-native-ble-plx` peer dep with
-  `@orbital-systems/react-native-esp-idf-provisioning` and re-run
-  `pod install` on iOS.
-- If you set `ProvisioningConfig.ble.deviceNamePrefix`, swap your
-  custom prefix for `"PROV_"` (or whatever your firmware's
-  `CONFIG_WIFI_CFG_NETWORK_PROVISIONING_SERVICE_PREFIX` is).
-- Add `ProvisioningConfig.ble.proofOfPossession` if your firmware uses
-  a non-default PoP. Set `security: 2` plus `username` for SRP6a.
-- Anywhere you read `wifiState`/`wifiIp`/`wifiSsid`/etc. from
-  `useProvisioning()`, switch to `lastProvisionResult` (SDK status +
-  SSID) or fetch the IP from your device's HTTP API after success.
-- If you used `useDeviceProtocol().addNetwork(...) + connectWifi(...)`
-  outside the wizard, replace with `protocol.provision(ssid, password)`.
-
-## 1.0.0
-
-Initial public release. Restructured around a granular step machine, unified error envelope, and verb-named action surface.
+- Four layers, each depending only on the one below: `BleTransport` (wraps the native SDK's
+  `searchESPDevices`/`connect`/`disconnect`) → `DeviceProtocol` (`provision()` + `scanWifiList()`
+  plus JSON-over-base64 for the firmware's custom protocomm endpoints) → `ProvisioningManager`
+  (wizard step machine, unified error model, `onConnected` hook) → Zustand store → React hooks →
+  pre-built screens. The SDK's atomic `provision()` resolves on STA-connect success or rejects on
+  failure, so there is no separate connection poller.
 
 ### Step machine
 
-10 distinct steps. Every visible UI state is its own step so consumers never have to derive shadow phase enums.
+- Ten distinct steps — every visible UI state is its own step, so consumers never derive shadow
+  phase enums:
+  `welcome → scanBle → [enterDeviceAuth] → connectingBle → configuring → scanningWifi →
+  chooseNetwork → enterCredentials → joiningWifi → success`.
+- `enterDeviceAuth` is inserted when the device needs runtime credentials (sec1 PoP, or sec2
+  username + SRP password) — driven by `ble.promptForAuth`, missing pre-configured credentials, or
+  an `unauthorized` retry.
+- `STEP_NUMBERS` collapses sub-states into stable numbered progress dots.
 
-```
-welcome → scanBle ⇄ connectingBle → configuring → scanningWifi ⇄ chooseNetwork
-                                                                       ↓
-                                       success ← joiningWifi ← enterCredentials
-                                          ↓
-                                        manage
-```
+### Action verbs (`useProvisioning()` / `ProvisioningManager`)
 
-`STEP_NUMBERS` collapses sub-states into 5 user-visible numbered steps for progress dots; sub-states share a number so labels stay stable.
-
-### Action verbs
-
-`ProvisioningManager` and `useProvisioning()` expose action verbs named after user intent:
-
-`start`, `chooseDevice`, `proceedFromConfigure`, `chooseNetwork`, `backToNetworks`, `submitPassword`, `retryJoin`, `pickDifferentNetwork`, `pickDifferentDevice`, `cancel`, `goToManage`, `rescanWifi`.
+`start`, `chooseDevice`, `submitDeviceAuth`, `proceedFromConfigure`, `chooseNetwork`,
+`backToNetworks`, `submitPassword`, `retryJoin`, `pickDifferentNetwork`, `pickDifferentDevice`,
+`cancel`, `rescanWifi`.
 
 ### Unified error model
 
@@ -168,14 +40,12 @@ One field, four sources:
 
 ```ts
 type ProvisioningError = {
-  source: 'ble' | 'protocol' | 'poller' | 'flow';
-  code?: string;
+  source: 'ble' | 'protocol' | 'provision' | 'flow';
+  code?: string;        // e.g. 'unauthorized', 'provision_failed'
   message: string;
   recoverable: boolean;
 };
 ```
-
-Replaces the previous fragmented `bleError` / `bleErrorCode` / `lastCommandError` / `pollError` / `provisioningError` fields.
 
 ### Unified device model
 
@@ -186,46 +56,46 @@ type DeviceConnection =
   | { status: 'connected'; id; name; mtu: number | null };
 ```
 
-Replaces `deviceName`, `deviceId`, `connectionState`. `device?.status === 'connecting'` is true through the BLE handshake.
+### Security
 
-### Pre-WiFi customization hook
+- Security 0/1/2 supported. Default Security 1 (X25519 + AES-CTR + PoP `"abcd1234"`), matching the
+  `esp_wifi_config` example default. Security 2 (SRP6a + AES-GCM) additionally requires a
+  pre-computed salt + verifier compiled into the firmware. Production fleets should override the
+  default PoP per device.
 
-`config.flow.onConnected` runs after BLE connect, before WiFi scan. Use to set hostname, app variables, or run any pre-provisioning checks. Throwing parks the manager on `configuring` with a `flow`-source error; consumer can retry via `proceedFromConfigure()`.
+### Custom firmware endpoints (`DeviceProtocol`)
 
-### Latched result
+- `scanWifi()`, `provision()`, `getVersion()`, `getCapabilities()`, `getNetworkPolicy()`,
+  `listVars()`, `getVar()`, `setVar()`, `delVar()`. These only work while the BLE protocomm session
+  is alive — schedule them inside `flow.onConnected` or before `submitPassword()`. Post-provisioning
+  device management (and the device IP, which the BLE SDK does not surface) is via the device's HTTP
+  API once it is on the network.
 
-`provisioningComplete` is now wired into the store as `lastResult`. Survives `cancel()` so the Success screen stays rendered after the device drops BLE post-join.
+### Hooks
 
-### Per-instance hook loading
+`useProvisioning`, `useDeviceScanner`, `useBleConnection`, `useDeviceProtocol`,
+`useDeviceVariables`. `useDeviceProtocol`/`useDeviceVariables` track loading per-instance (no global
+busy flag).
 
-`useDeviceVariables` and `useDeviceProtocol` track loading per instance, not from a global flag. Two hook instances calling commands in parallel observe their own loading independently.
+### Other
 
-### `scanCompleted` event
+- `config.flow.onConnected` runs after BLE connect, before the Wi-Fi scan, for pre-provisioning
+  setup (hostname, app variables, firmware checks). Throwing parks the manager on `configuring` with
+  a recoverable `flow`-source error.
+- `lastResult` survives `cancel()` so the success screen stays rendered after the device drops BLE.
+- Multi-prefix scanning: `deviceNamePrefix` accepts `string | string[]`.
+- `requestBluetoothPermissions()` helper for Android 12+/<12 and iOS.
+- `BleTransport` emits `scanCompleted` after every scan; the `error` event is reserved for true
+  failures (BLE off, unauthorized, scan error) — an empty scan is not an error.
 
-`BleTransport` emits a separate `scanCompleted` event after every scan with `{ matched, total, sampleNames }`. The `error` event is reserved for true failures (BLE off, unauthorized, scan_error). Empty scans no longer surface as errors.
+### Notable fixes during development
 
-### `requestBluetoothPermissions` helper
-
-Library now ships a runtime-permission helper for Android 12+/<12 + iOS no-op. No more reinventing it in every consumer.
-
-### Multi-prefix scanning
-
-`deviceNamePrefix: string | string[]` for vendors with multiple product lines.
-
-### Documentation
-
-- `CLAUDE.md`: agent-targeted integration guide.
-- `GUIDES/`: 7 task-oriented walkthroughs.
-- `examples/`: 4 complete copy-pasteable files.
-- `API.md`: exhaustive symbol reference.
-- `llms.txt`: AI-agent index of all docs.
-
-### Regression fixes
-
-- Post-success BLE drop no longer raises a "Bluetooth connection lost" error and resets to `welcome`. Disconnect listener exempts `success` and `manage`.
-- `provisioningComplete` event now reaches hooks (was emitted but never subscribed).
-- `useDeviceVariables` no longer collides with the wizard's protocol activity (per-instance loading tracker).
-
-### Repo
-
-Renamed from `esp_wifi_manager_react_native` to `esp-wifi-config-react-native`. Origin URL updated to match.
+- **`joiningWifi` is disconnect-safe** — the firmware reboots on a successful provision and drops
+  BLE as soon as the client disconnects after seeing "connected", which can race the resolution of
+  the SDK's atomic `provision()`. A BLE disconnect on `joiningWifi` is treated as success, not a
+  fatal `connection_lost`; the real outcome comes from the `provision()` promise. Verified
+  end-to-end on iOS hardware across Security 0/1/2. (Pairs with the firmware raising its
+  reboot-on-success backstop 3 s → 15 s; see `bluetooth_spec.md` §18.2.)
+- **Custom protocomm endpoints send `{}` for empty requests** — a zero-length write is not
+  dispatched by the ESP32 protocomm BLE transport, so `getVersion`/`getCapabilities`/
+  `getNetworkPolicy` would otherwise get no response. See `bluetooth_spec.md` §12 and §18.5.

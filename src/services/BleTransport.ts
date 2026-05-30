@@ -8,13 +8,13 @@
  *   - Connection / session-init using the configured Security 1 / 2 PoP
  *   - Reference holding for the active `ESPDevice` so DeviceProtocol /
  *     ProvisioningManager can hand off scan / provision / sendData calls
- *   - Typed event emission compatible with the v1 transport
+ *   - Typed event emission for the store / hooks / screens
  *
  * The native SDK does not stream individual discoveries — `searchESPDevices`
  * resolves with the full list at the end of a scan cycle. We emit
  * `deviceDiscovered` once per matched device when results land, then a
- * single `scanCompleted`. This is a behaviour change from v1 (live
- * discovery stream) but is what the underlying SDK supports.
+ * single `scanCompleted` — there is no live per-advertisement discovery
+ * stream, that is just what the underlying SDK supports.
  */
 
 import {

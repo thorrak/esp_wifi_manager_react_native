@@ -4,13 +4,9 @@ BLE-based Wi-Fi provisioning for ESP32 devices from React Native apps.
 
 Talks to ESP32 devices running [esp_wifi_config](https://github.com/thorrak/esp_wifi_config) **0.1.0+** firmware via ESP-IDF's official Wi-Fi/Network Provisioning protocol over BLE, drives a 10-step state machine, and ships pre-built screens you can drop in or replace.
 
-> **2.x is a breaking rewrite.** v1 spoke a custom JSON-over-GATT
-> protocol that no longer exists in the firmware. v2 wraps Espressif's
-> native iOS/Android provisioning SDKs via
-> [`@orbital-systems/react-native-esp-idf-provisioning`](https://www.npmjs.com/package/@orbital-systems/react-native-esp-idf-provisioning).
-> See [CHANGELOG.md](./CHANGELOG.md) for the full migration list. If
-> you're still running esp_wifi_config 0.0.x firmware, pin to
-> `esp-wifi-config-react-native@^1`.
+It wraps Espressif's native iOS/Android provisioning SDKs via
+[`@orbital-systems/react-native-esp-idf-provisioning`](https://www.npmjs.com/package/@orbital-systems/react-native-esp-idf-provisioning),
+so you don't talk GATT directly.
 
 **Platforms:** iOS, Android, Expo (custom development build).
 

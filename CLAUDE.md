@@ -6,11 +6,9 @@ This file is the canonical entry point for AI agents (Claude Code, etc.) integra
 
 `esp-wifi-config-react-native` is a React Native library that lets a mobile app provision Wi-Fi credentials onto an ESP32 device over BLE using ESP-IDF's official Wi-Fi/Network Provisioning protocol. The device must be running [esp_wifi_config](https://github.com/thorrak/esp_wifi_config) **0.1.0+** firmware with `CONFIG_WIFI_CFG_ENABLE_NETWORK_PROVISIONING=y`.
 
-> **Library version 2.x is a breaking rewrite.** v1 spoke a custom
-> JSON-over-GATT 0xFFE0 protocol that no longer exists in firmware. v2
-> wraps Espressif's native iOS/Android provisioning SDKs via
-> [`@orbital-systems/react-native-esp-idf-provisioning`](https://www.npmjs.com/package/@orbital-systems/react-native-esp-idf-provisioning).
-> See [CHANGELOG.md](./CHANGELOG.md) for the full migration list.
+The library wraps Espressif's native iOS/Android provisioning SDKs via
+[`@orbital-systems/react-native-esp-idf-provisioning`](https://www.npmjs.com/package/@orbital-systems/react-native-esp-idf-provisioning)
+rather than speaking GATT directly.
 
 Three integration paths, in order of decreasing abstraction:
 
@@ -38,7 +36,7 @@ React hooks ── thin selectors + per-instance loading/error trackers
 Pre-built screens / your UI
 ```
 
-Each layer only depends on the one below it. The store IS the canonical reactive state. The `ConnectionPoller` from v1 is gone — the SDK's atomic `provision()` resolves on STA-connect success or rejects on failure.
+Each layer only depends on the one below it. The store IS the canonical reactive state. There is no connection poller — the SDK's atomic `provision()` resolves on STA-connect success or rejects on failure.
 
 ## The step machine — single source of truth
 
@@ -61,7 +59,7 @@ Every distinct UI state has its own step. Drive your UI off `step`; never derive
 - `security !== 0` AND either `promptForAuth: true` in config, OR the required credentials (`proofOfPossession` for sec1; `proofOfPossession` + `username` for sec2) aren't pre-configured; OR
 - the previous `connectingBle` attempt was rejected with `error.code === 'unauthorized'` — the screen then re-renders with the last-entered values so the user can fix a typo.
 
-The `manage` step from earlier v2 drafts is gone. The firmware tears down BLE on successful provisioning (and, with `reboot_on_provisioning_success`, reboots the device shortly after), so there is no BLE link left to manage anything from. Post-provisioning device management should go over your device's HTTP API.
+There is no `manage` step. The firmware tears down BLE on successful provisioning (and, by default, reboots the device shortly after), so there is no BLE link left to manage anything from. Post-provisioning device management should go over your device's HTTP API.
 
 Source: `src/types/provisioning.ts` → `ProvisioningStep`. Numbered steps via `STEP_NUMBERS` (sub-states share a number, so progress dots are stable). `enterDeviceAuth` shares dot 1 with `scanBle`/`connectingBle`.
 

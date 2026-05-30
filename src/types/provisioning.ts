@@ -1,20 +1,19 @@
 /**
- * Provisioning flow types — the v2 step machine, error model, device model,
+ * Provisioning flow types — the step machine, error model, device model,
  * and configuration shape.
  *
  * The step machine is the single source of truth for "what is the user
  * currently doing"; every visible UI state has a distinct step. Consumers
  * should drive their UI off `step` and never derive their own phase enums.
  *
- * v2 differences from v1:
+ * Notes:
  *   - Credentials are exchanged via the SDK's atomic `provision()` call,
  *     which both sends credentials and waits for the device to attempt
- *     STA-connect — no separate poller stage.
+ *     STA-connect — there is no separate poller stage.
  *   - There is no `manage` step. The firmware tears down BLE on
- *     successful provisioning (and, with `reboot_on_provisioning_success`
- *     enabled, reboots the device shortly after) — so there's no BLE
- *     link to manage anything from. Post-provisioning device management
- *     happens over the device's HTTP API.
+ *     successful provisioning (and, by default, reboots the device shortly
+ *     after) — so there's no BLE link to manage anything from.
+ *     Post-provisioning device management happens over the device's HTTP API.
  *   - A conditional `enterDeviceAuth` step prompts the user for the PoP
  *     (Security 1) or username + SRP password (Security 2) when those
  *     credentials are not configured up front, or when `promptForAuth`

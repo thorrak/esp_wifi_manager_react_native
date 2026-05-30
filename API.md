@@ -1,6 +1,6 @@
 # API Reference
 
-Exhaustive reference for every exported symbol in `esp-wifi-config-react-native` v2. Every entry has a one-paragraph description plus an example. The TypeScript types in `src/types/` are the source of truth; this document mirrors them.
+Exhaustive reference for every exported symbol in `esp-wifi-config-react-native`. Every entry has a one-paragraph description plus an example. The TypeScript types in `src/types/` are the source of truth; this document mirrors them.
 
 For runnable examples see [examples/](./examples/). For task-oriented walkthroughs see [GUIDES/](./GUIDES/). For the mental model and pitfalls see [CLAUDE.md](./CLAUDE.md).
 
@@ -366,7 +366,7 @@ type ProvisioningTheme = {
 type ScanCompletedInfo = {
   matched: number;       // devices matching deviceNamePrefix
   total: number;         // SDK only returns matches, so total === matched
-  sampleNames: string[]; // always empty for the SDK transport — kept for v1 shape compatibility
+  sampleNames: string[]; // empty on the SDK transport (not populated by the native layer)
 };
 ```
 

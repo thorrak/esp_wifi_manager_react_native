@@ -5,10 +5,9 @@
  * Emits typed events so consumers (the Zustand store, tests, headless
  * callers) can react without coupling to lower layers.
  *
- * Compared to v1 there is no separate ConnectionPoller — the SDK's
- * `provision()` is atomic (sends credentials AND waits for STA-connect
- * success/failure), so the joiningWifi step resolves directly off the
- * promise.
+ * There is no separate connection poller — the SDK's `provision()` is
+ * atomic (sends credentials AND waits for STA-connect success/failure),
+ * so the joiningWifi step resolves directly off the promise.
  */
 
 import type {

@@ -1,10 +1,9 @@
 /**
- * High-level smoke tests for the v2 ProvisioningManager step machine.
+ * High-level smoke tests for the ProvisioningManager step machine.
  *
- * These don't exhaustively cover every edge case — the previous v1 test
- * suite was wholly invalid against the new SDK-backed protocol, so this
- * file replaces it with a minimum bar: scan → connect → wifi-scan →
- * choose → submitPassword → success transitions cleanly.
+ * These don't exhaustively cover every edge case — the bar here is that the
+ * core path (scan → connect → wifi-scan → choose → submitPassword → success)
+ * transitions cleanly, plus the auth-prompt and disconnect-safety branches.
  */
 
 import { mockHooks } from '../__mocks__/esp-idf-provisioning';
@@ -19,7 +18,7 @@ import {
 } from '../__mocks__/esp-idf-provisioning';
 import { Buffer } from 'buffer';
 
-describe('ProvisioningManager (v2 SDK-backed)', () => {
+describe('ProvisioningManager (SDK-backed)', () => {
   beforeEach(() => {
     // Reset hook overrides between tests
     mockHooks.search = undefined;

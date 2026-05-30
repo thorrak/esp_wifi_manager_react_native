@@ -1,6 +1,6 @@
 {
   "name": "esp-wifi-config-react-native",
-  "version": "2.0.0",
+  "version": "1.0.0",
   "description": "React Native library for ESP-IDF Network Provisioning (BLE) on devices running esp_wifi_config 0.1.0+",
   "main": "lib/commonjs/index.js",
   "module": "lib/module/index.js",

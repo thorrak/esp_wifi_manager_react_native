@@ -179,55 +179,50 @@ export class BleTransport extends TypedEventEmitter<BleTransportEvents> {
     }, this.config.scanTimeoutMs);
 
     const matched = new Map<string, ESPDevice>();
+    let scanError: BleLibraryError | null = null;
 
-    // Run one searchESPDevices() call per prefix. The SDK API only accepts a
-    // single prefix per call, so we serialise — but each prefix MUST be
-    // isolated. The native SDK *rejects* a search when a prefix matches no
-    // device; that is an empty result for that prefix, not a scan failure. If
-    // we let one rejection escape (e.g. 'BrewPiESP-' when only a 'TiltBridge-'
-    // device is present) it would abort the remaining prefixes and discard
-    // devices already matched. So we catch per-prefix, treat "not found" as
-    // empty, and collect only genuinely actionable failures (Bluetooth off /
-    // unauthorized) to surface if nothing matched at all.
-    const realErrors: BleLibraryError[] = [];
-
-    for (const prefix of this.config.deviceNamePrefixes) {
-      if (this._destroyed) break;
-      try {
-        const devices = await ESPProvisionManager.searchESPDevices(
-          prefix,
-          ESPTransport.ble,
-          toEspSecurity(this.config.security),
-        );
-        for (const d of devices) {
-          if (!matched.has(d.name)) matched.set(d.name, d);
+    // Run a SINGLE match-all scan and filter by prefix in JS, rather than one
+    // searchESPDevices() call per prefix. Two reasons the per-prefix approach
+    // is broken: (1) each call runs a full (~5s) BLE scan with a fixed SDK
+    // timer, so N prefixes take N×5s and our hard-cap timeout fires *during* a
+    // later prefix's scan, force-stopping it into a false "not found"; (2) it
+    // scans the air N times for no reason. An empty prefix matches every named
+    // device (the SDK does `name.hasPrefix("")` → always true), so one scan
+    // surfaces everything; we then keep only devices matching a configured
+    // prefix. The SDK still *rejects* when it finds no named device at all —
+    // that's a benign empty result, not a failure, unless it's actionable
+    // (Bluetooth off / unauthorized).
+    try {
+      const devices = await ESPProvisionManager.searchESPDevices(
+        '',
+        ESPTransport.ble,
+        toEspSecurity(this.config.security),
+      );
+      for (const d of devices) {
+        if (this.matchesAnyPrefix(d.name) && !matched.has(d.name)) {
+          matched.set(d.name, d);
         }
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        if (/unauth/i.test(message)) {
-          realErrors.push(
-            new BleLibraryError('unauthorized', `BLE scan error: ${message}`),
-          );
-        } else if (/off|disabled/i.test(message)) {
-          realErrors.push(
-            new BleLibraryError('powered_off', `BLE scan error: ${message}`),
-          );
-        } else {
-          // Almost always "no device found for prefix" — a benign empty
-          // result for this prefix, not a failure. Just move on.
-          log.debug(`Prefix "${prefix}" matched no devices: ${message}`);
-        }
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      if (/unauth/i.test(message)) {
+        scanError = new BleLibraryError('unauthorized', `BLE scan error: ${message}`);
+      } else if (/off|disabled/i.test(message)) {
+        scanError = new BleLibraryError('powered_off', `BLE scan error: ${message}`);
+      } else {
+        // Almost always "no device found" — a benign empty result, not a
+        // failure. Reported below via scanCompleted (matched: 0).
+        log.debug(`Scan matched no devices: ${message}`);
       }
     }
 
     this.clearScanTimeout();
     if (this._destroyed) return;
 
-    // Surface a hard error only when nothing matched AND at least one prefix
-    // failed for an actionable reason. "No devices found" is reported via
-    // scanCompleted (matched: 0), never the error event — see CLAUDE.md.
-    if (matched.size === 0 && realErrors.length > 0) {
-      const scanError = realErrors[0];
+    // Surface a hard error only when nothing matched AND the scan failed for an
+    // actionable reason. "No devices found" is reported via scanCompleted
+    // (matched: 0), never the error event — see CLAUDE.md.
+    if (matched.size === 0 && scanError) {
       log.error('Scan failed:', scanError.message);
       this.emit('error', scanError);
       this.setConnectionState('disconnected');
@@ -396,6 +391,18 @@ export class BleTransport extends TypedEventEmitter<BleTransportEvents> {
   // ────────────────────────────────────────────────────────────────────
   // Internals
   // ────────────────────────────────────────────────────────────────────
+
+  /**
+   * Case-insensitive prefix match, mirroring the native SDK's own
+   * `name.lowercased().hasPrefix(prefix.lowercased())`. An empty configured
+   * prefix matches everything.
+   */
+  private matchesAnyPrefix(name: string): boolean {
+    const lower = name.toLowerCase();
+    return this.config.deviceNamePrefixes.some((p) =>
+      lower.startsWith(p.toLowerCase()),
+    );
+  }
 
   private setConnectionState(state: BleConnectionState): void {
     if (this._connectionState === state) return;

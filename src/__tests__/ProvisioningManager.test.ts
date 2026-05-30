@@ -121,6 +121,56 @@ describe('ProvisioningManager (v2 SDK-backed)', () => {
     expect(manager.error?.recoverable).toBe(true);
   });
 
+  it('treats a BLE disconnect during joiningWifi as success, not a fatal error', async () => {
+    // Regression: the esp_wifi_config firmware reboots on successful
+    // provisioning and drops BLE as soon as the client disconnects after
+    // seeing "connected" — which can race the resolution of the SDK's
+    // atomic provision(). A disconnect observed on joiningWifi must NOT
+    // fire connection_lost / cancel(): that would clobber a provision that
+    // actually succeeded. (See DISCONNECT_SAFE_STEPS; spec §18.2.)
+    mockHooks.search = (prefix) => [
+      new ESPDevice({ name: prefix + 'AB12CD', transport: ESPTransport.ble, security: ESPSecurity.secure }),
+    ];
+    mockHooks.scanWifi = () => [
+      { ssid: 'Home', rssi: -45, auth: ESPWifiAuthMode.wpa2Psk },
+    ];
+    // Deferred provision so we can inject a BLE disconnect while it is
+    // still pending (mirroring the firmware rebooting mid-poll).
+    let resolveProvision!: (r: { status: string }) => void;
+    mockHooks.provision = () =>
+      new Promise((resolve) => {
+        resolveProvision = resolve;
+      });
+
+    const transport = new BleTransport({ deviceNamePrefix: 'PROV_' });
+    const protocol = new DeviceProtocol(transport);
+    const manager = new ProvisioningManager(transport, protocol);
+
+    await manager.start();
+    await manager.chooseDevice({ id: 'PROV_AB12CD', name: 'PROV_AB12CD', rssi: null });
+    manager.chooseNetwork({ ssid: 'Home', rssi: -45, auth: 'WPA2' });
+
+    // Kick off provisioning but don't await — parked on joiningWifi with
+    // provision() in flight.
+    const provisioning = manager.submitPassword('hunter2');
+    expect(manager.currentStep).toBe('joiningWifi');
+
+    // Firmware reboots on success → BLE link drops mid-provision.
+    // disconnect() is the public path that emits connectionStateChanged.
+    await transport.disconnect();
+
+    // Must NOT have cancelled the flow or raised an error.
+    expect(manager.currentStep).toBe('joiningWifi');
+    expect(manager.error).toBeNull();
+
+    // provision() then resolves successfully (device is on WiFi).
+    resolveProvision({ status: 'connected' });
+    await provisioning;
+
+    expect(manager.currentStep).toBe('success');
+    expect(manager.error).toBeNull();
+  });
+
   // -------------------------------------------------------------------------
   // enterDeviceAuth: skip / prompt / unauthorized-retry
   // -------------------------------------------------------------------------

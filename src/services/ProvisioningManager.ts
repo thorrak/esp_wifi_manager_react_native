@@ -80,20 +80,24 @@ function toErrorMessage(err: unknown): string {
 /**
  * Steps where an unexpected BLE disconnect should NOT raise an error.
  *
- * `joiningWifi` is deliberately NOT in this set, but the success path
- * still survives: the SDK's atomic `provision()` resolves as soon as
- * the device reports STA-connected, which moves the step to `success`
- * (which IS safe). Firmware configured with `stop_provisioning_on_connect`
- * or `reboot_on_provisioning_success` will drop BLE shortly afterwards,
- * but by then we're already on `success` and the disconnect handler
- * no-ops. If a future firmware change shortens that gap to zero, this
- * assumption breaks and `joiningWifi` would need to be safe too.
+ * `joiningWifi` IS included. The `esp_wifi_config` firmware reboots on
+ * successful provisioning (default on) and tears down BLE — and it does
+ * so *as soon as the client disconnects after seeing "connected"*, which
+ * can race the resolution of the SDK's atomic `provision()`. If the BLE
+ * drop is observed while we're still on `joiningWifi`, treating it as a
+ * fatal `connection_lost` would clobber a provision that actually
+ * succeeded (the device is on WiFi and rebooting). Per the protocol spec
+ * (§18.2), a BLE disconnect shortly after apply must be treated as
+ * success, not failure — so `joiningWifi` is disconnect-safe and the
+ * real outcome is taken from the `provision()` promise (success → the
+ * `success` step; rejection → a `provision`-source error).
  */
 const DISCONNECT_SAFE_STEPS: ReadonlySet<ProvisioningStep> = new Set<ProvisioningStep>([
   'welcome',
   'scanBle',
   'enterDeviceAuth',
   'connectingBle',
+  'joiningWifi',
   'success',
 ]);
 

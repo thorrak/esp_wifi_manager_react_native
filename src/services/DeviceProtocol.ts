@@ -281,7 +281,14 @@ export class DeviceProtocol extends TypedEventEmitter<DeviceProtocolEvents> {
   ): Promise<TRes> {
     const device = this.requireDevice();
     const ms = this.resolveTimeout(endpoint);
-    const requestStr = body === undefined ? '' : JSON.stringify(body);
+    // IMPORTANT: never send a zero-length payload. The ESP32 protocomm BLE
+    // transport does not dispatch an empty write to its endpoint handler, so
+    // the device produces no response and the read returns empty (the call
+    // then times out / throws "Empty response"). The read-only custom
+    // endpoints (version/capabilities/network-policy) ignore the body but
+    // still need at least one byte — send "{}" for an empty request.
+    // (Hardware-verified; see bluetooth_spec.md §12 and §18.5.)
+    const requestStr = body === undefined ? '{}' : JSON.stringify(body);
     const requestB64 = Buffer.from(requestStr, 'utf-8').toString('base64');
 
     this.setBusy(true);

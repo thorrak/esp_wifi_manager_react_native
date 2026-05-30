@@ -363,7 +363,7 @@ npm run build  # CommonJS + ESM + .d.ts
 - [examples/](./examples/) — complete copy-pasteable files
 - [API.md](./API.md) — exhaustive symbol reference
 - [ARCHITECTURE.md](./ARCHITECTURE.md) — internal layering and event flow
-- [bluetooth_spec.md](./bluetooth_spec.md) — BLE provisioning protocol spec (byte-level, hardware-verified)
+- [GUIDES/bluetooth_spec.md](./GUIDES/bluetooth_spec.md) — BLE provisioning protocol spec (byte-level, hardware-verified)
 - [CHANGELOG.md](./CHANGELOG.md) — version history
 
 ## License

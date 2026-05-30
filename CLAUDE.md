@@ -260,6 +260,7 @@ Pass to `<ProvisioningNavigator config={...} />` or `initializeServices(config)`
 - `GUIDES/05-error-handling.md` — `ProvisioningError` model in depth
 - `GUIDES/06-managing-saved-networks.md` — post-provision device management
 - `GUIDES/07-testing-your-integration.md` — mocking transport for unit tests
+- `GUIDES/bluetooth_spec.md` — byte-level BLE provisioning protocol spec (hardware-verified)
 - `ARCHITECTURE.md` — internal layering, event flow, contributor guide
 - `API.md` — exhaustive symbol reference
 

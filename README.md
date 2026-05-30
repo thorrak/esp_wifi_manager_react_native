@@ -360,7 +360,8 @@ npm run build  # CommonJS + ESM + .d.ts
 
 - [CLAUDE.md](./CLAUDE.md) — agent integration guide (start here)
 - [GUIDES/](./GUIDES/) — task-oriented walkthroughs
-- [examples/](./examples/) — complete copy-pasteable files
+- [example_app/](./example_app/) — full runnable Expo example app (navigator flow + diagnostics)
+- [examples/](./examples/) — focused copy-pasteable snippet files
 - [API.md](./API.md) — exhaustive symbol reference
 - [ARCHITECTURE.md](./ARCHITECTURE.md) — internal layering and event flow
 - [GUIDES/bluetooth_spec.md](./GUIDES/bluetooth_spec.md) — BLE provisioning protocol spec (byte-level, hardware-verified)

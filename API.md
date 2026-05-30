@@ -2,7 +2,7 @@
 
 Exhaustive reference for every exported symbol in `esp-wifi-config-react-native`. Every entry has a one-paragraph description plus an example. The TypeScript types in `src/types/` are the source of truth; this document mirrors them.
 
-For runnable examples see [examples/](./examples/). For task-oriented walkthroughs see [GUIDES/](./GUIDES/). For the mental model and pitfalls see [CLAUDE.md](./CLAUDE.md).
+For a full runnable app see [example_app/](./example_app/); for focused snippets see [examples/](./examples/). For task-oriented walkthroughs see [GUIDES/](./GUIDES/). For the mental model and pitfalls see [CLAUDE.md](./CLAUDE.md).
 
 ## Core hooks
 

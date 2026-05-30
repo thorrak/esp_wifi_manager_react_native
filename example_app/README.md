@@ -1,0 +1,138 @@
+# EspWifiReactTest
+
+Example app demonstrating [esp-wifi-config-react-native](https://github.com/thorrak/esp_wifi_config_react_native) — a React Native library for BLE-based WiFi provisioning of ESP32 devices running [esp_wifi_config](https://github.com/thorrak/esp_wifi_config) firmware (≥ 0.1.0).
+
+The library wraps Espressif's official iOS / Android provisioning SDKs via [`@orbital-systems/react-native-esp-idf-provisioning`](https://www.npmjs.com/package/@orbital-systems/react-native-esp-idf-provisioning) and speaks ESP-IDF Network Provisioning over BLE.
+
+## Prerequisites
+
+- Node.js 18+
+- Xcode 15+ (iOS) or Android Studio (Android)
+- A physical iOS or Android device (BLE is not available in simulators/emulators)
+- **Cannot run in Expo Go** — the native provisioning module requires a dev build
+
+## Getting Started
+
+```bash
+npm install
+npx expo prebuild --clean      # regenerate the ios/ and android/ native projects
+npx expo run:ios --device      # or: npx expo run:android
+```
+
+The first build compiles all native code and takes several minutes. Subsequent builds are incremental.
+
+## How It Works
+
+The app has two tabs:
+
+- **Home** (`app/(tabs)/index.tsx`) — A single button that launches the provisioning flow.
+- **Diagnostics** (`app/(tabs)/diagnostics.tsx`) — A step-by-step diagnostic that drives `BleTransport` and `DeviceProtocol` directly, exercising permissions, BLE scan (default and custom prefix), protocomm session, and each custom endpoint (`getVersion`, `getCapabilities`, `getNetworkPolicy`, `listVars`, `scanWifi`).
+
+Provisioning itself runs in a modal route at `app/provision.tsx`, which renders `ProvisioningNavigator` full-screen. The navigator handles the entire flow (BLE scan → optional PoP entry → connect → WiFi scan → credentials → join). On completion or dismissal, it navigates back to the home screen.
+
+The root layout (`app/_layout.tsx`) registers the provisioning screen as a modal:
+
+```tsx
+<Stack.Screen
+  name="provision"
+  options={{ presentation: 'modal', headerShown: false }}
+/>
+```
+
+## Building Your Own App
+
+### 1. Install the library and its peer dependencies
+
+```bash
+npm install esp-wifi-config-react-native @orbital-systems/react-native-esp-idf-provisioning
+npx expo install expo-build-properties
+npx expo install @react-navigation/native @react-navigation/native-stack react-native-screens react-native-safe-area-context
+```
+
+### 2. Configure permissions in `app.json`
+
+```json
+{
+  "plugins": [
+    ["@orbital-systems/react-native-esp-idf-provisioning", { "isBackgroundEnabled": false, "neverForLocation": true }],
+    ["expo-build-properties", { "ios": { "deploymentTarget": "15.1" } }]
+  ],
+  "ios": {
+    "infoPlist": {
+      "NSBluetoothAlwaysUsageDescription": "This app uses Bluetooth to communicate with ESP devices for WiFi provisioning."
+    }
+  },
+  "android": {
+    "permissions": [
+      "BLUETOOTH_SCAN",
+      "BLUETOOTH_CONNECT",
+      "ACCESS_FINE_LOCATION"
+    ]
+  }
+}
+```
+
+### 3. Enable package exports in `metro.config.js`
+
+The library's `/navigation` subpath import requires Metro's package-exports support:
+
+```js
+const { getDefaultConfig } = require('expo/metro-config');
+
+const config = getDefaultConfig(__dirname);
+config.resolver.unstable_enablePackageExports = true;
+
+module.exports = config;
+```
+
+### 4. Render `ProvisioningNavigator`
+
+```tsx
+import { ProvisioningNavigator } from 'esp-wifi-config-react-native/navigation';
+import { requestBluetoothPermissions } from 'esp-wifi-config-react-native';
+
+export default function ProvisionScreen() {
+  // Optional pre-flight: requestBluetoothPermissions() returns
+  // { granted: true } or { granted: false; reason }
+  return (
+    <ProvisioningNavigator
+      config={{
+        ble: {
+          deviceNamePrefix: 'PROV_',  // matches firmware default
+          security: 1,
+          promptForAuth: true,        // ask user for PoP at runtime
+        },
+      }}
+      onComplete={(result) => {
+        // result: { success, ssid, provisionStatus, deviceName, deviceId }
+        console.log('Provisioning complete:', result);
+      }}
+      onDismiss={() => {
+        // User cancelled — navigate back
+      }}
+    />
+  );
+}
+```
+
+`ProvisioningNavigator` manages its own internal navigation stack — just give it a full-screen container.
+
+### 5. Build and run
+
+```bash
+npx expo prebuild --clean
+npx expo run:ios --device     # or: npx expo run:android
+```
+
+You must use `expo run:ios` or `expo run:android` (dev builds). **Expo Go does not work** because the native module isn't included in the Expo Go client.
+
+## Key Points
+
+- **Firmware**: requires `esp_wifi_config` ≥ 0.1.0 with `CONFIG_WIFI_CFG_ENABLE_NETWORK_PROVISIONING=y`.
+- **Dev builds only** — the orbital-systems SDK is a native module. Use `expo run:ios` / `expo run:android`, not `expo start`.
+- **iOS deployment target** — must be at least 15.1 for Expo SDK 54. Set via `expo-build-properties`.
+- **`neverForLocation: true`** — tells iOS that BLE is not used for location tracking, avoiding a location permission prompt.
+- **Android 12+ runtime permissions** — `BLUETOOTH_SCAN` and `BLUETOOTH_CONNECT` are runtime permissions on API 31+; call `requestBluetoothPermissions()` before scanning.
+- **`promptForAuth`** — set to `true` if each device has a unique Proof-of-Possession; leave default (`false`) if the PoP is fleet-wide and baked into your app config.
+- **Device IP** — the BLE protocol does NOT expose the device's IP after WiFi join. If you need it, resolve via mDNS or fetch from your firmware's HTTP API on the WiFi network once `onComplete` fires.
+- **Headless usage** — `useProvisioning`, `useDeviceScanner`, `useDeviceProtocol`, `useDeviceVariables`, and the `BleTransport` / `DeviceProtocol` / `ProvisioningManager` service classes are exported for custom flows.

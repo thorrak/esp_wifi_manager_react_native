@@ -263,6 +263,8 @@ Pass to `<ProvisioningNavigator config={...} />` or `initializeServices(config)`
 - `GUIDES/bluetooth_spec.md` — byte-level BLE provisioning protocol spec (hardware-verified)
 - `ARCHITECTURE.md` — internal layering, event flow, contributor guide
 - `API.md` — exhaustive symbol reference
+- `example_app/` — full runnable Expo example app (links the library via `file:..`); `examples/` — focused snippet files
+- `example_app/` — full runnable Expo example app (links the library via `file:..`); `examples/` — focused snippet files
 
 ## Code style notes
 

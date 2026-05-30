@@ -26,6 +26,8 @@ If you are an AI agent helping integrate or modify this library, read CLAUDE.md 
 
 ## Examples
 
+- [example_app/](example_app/): Full runnable Expo app — `ProvisioningNavigator` flow (app/provision.tsx) plus a Diagnostics tab exercising BleTransport/DeviceProtocol/custom endpoints. Links the library via `file:..`.
+- [example_app/](example_app/): Full runnable Expo app — `ProvisioningNavigator` flow (app/provision.tsx) plus a Diagnostics tab exercising BleTransport/DeviceProtocol/custom endpoints. Links the library via `file:..`.
 - [examples/minimal-app.tsx](examples/minimal-app.tsx): Bare ProvisioningNavigator inside Expo Router.
 - [examples/custom-wizard.tsx](examples/custom-wizard.tsx): Hooks-driven wizard, ~200 lines.
 - [examples/with-onconnected.tsx](examples/with-onconnected.tsx): Pre-WiFi mDNS hostname setup via custom protocomm endpoint.

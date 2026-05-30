@@ -35,7 +35,7 @@ type ProvisioningError = {
 | `unsupported` | `ble` | BLE not supported on this device |
 | `scan_error` | `ble` | Scan API returned an error |
 | `connect_error` | `ble` | Generic BLE connect failure not classified as `unauthorized` |
-| `connection_lost` | `ble` | Mid-flow BLE disconnect on a step other than `success` |
+| `connection_lost` | `ble` | Unexpected mid-flow BLE disconnect on a step that is *not* disconnect-safe |
 | `provision_failed` | `provision` | The SDK's `provision()` rejected — typically a wrong WiFi password or the AP being unreachable |
 | `no_network` | `flow` | `submitPassword` called with no `selectedNetwork` |
 | `no_device` | `flow` | `submitDeviceAuth` called with no pending device target |
@@ -69,6 +69,18 @@ return (
 ```
 
 That's it. One field, one banner, optional contextual hints from `code`.
+
+## A BLE disconnect during `joiningWifi` is *not* an error
+
+The `esp_wifi_config` firmware reboots on a successful provision and tears down BLE — and it does
+so **as soon as the client disconnects after the device reports "connected"**, which can race the
+resolution of the SDK's atomic `provision()`. The manager treats `joiningWifi` (along with
+`welcome`, `scanBle`, `enterDeviceAuth`, `connectingBle`, and `success`) as **disconnect-safe**: a
+BLE drop on those steps does **not** raise `connection_lost`. The real outcome of the join is taken
+from the `provision()` promise — success advances to `success`; rejection sets a recoverable
+`provision`-source error. So you never need to special-case "BLE dropped while joining" in your UI;
+just render `error` and the `step` as usual. (Background: this race, with a too-short firmware reboot
+delay, was a real cause of false "provisioning failed" reports — see `bluetooth_spec.md` §18.2.)
 
 ## Retry decisions
 

@@ -45,6 +45,29 @@
   belongs on the HTTP API.
 - `README.md` adds a Security versions section and refreshed
   configuration / step machine sections.
+- Documented the Security 2 device-side salt/verifier requirement and
+  the firmware reboot-vs-poll race across `README.md`, `CLAUDE.md`,
+  `GUIDES/05-error-handling.md`, and `bluetooth_spec.md` (§18).
+
+### Fixed
+
+- **`joiningWifi` is now disconnect-safe — fixes false provisioning
+  failures.** The `esp_wifi_config` firmware reboots on a successful
+  provision and drops BLE as soon as the client disconnects after
+  seeing "connected", which can race the resolution of the SDK's atomic
+  `provision()`. Previously a BLE disconnect observed while on
+  `joiningWifi` raised `connection_lost` and cancelled the flow,
+  clobbering a provision that had actually succeeded. `joiningWifi` is
+  now in `DISCONNECT_SAFE_STEPS`; the real outcome is taken from the
+  `provision()` promise. Verified end-to-end on iOS hardware across
+  Security 0/1/2. (Pairs with a firmware-side fix raising the
+  reboot-on-success backstop 3 s → 15 s; see `bluetooth_spec.md` §18.2.)
+- **Custom protocomm endpoints no longer send a zero-length write.**
+  `DeviceProtocol`'s read-only helpers (`getVersion`, `getCapabilities`,
+  `getNetworkPolicy`) sent an empty request body, which the ESP32
+  protocomm BLE transport does not dispatch to a handler — the device
+  returned nothing and the call threw "Empty response". Empty requests
+  are now sent as `{}`. See `bluetooth_spec.md` §12 and §18.5.
 
 ## 2.0.0 — 2026-05-10
 

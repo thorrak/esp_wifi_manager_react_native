@@ -229,7 +229,15 @@ type ProvisioningConfig = {
 
 ### Security versions in one paragraph
 
-Default is **Security 1** (X25519 + AES-CTR + PoP) with PoP `"abcd1234"` — matches the firmware's Kconfig default. For **Security 0** (no encryption), set `ble.security: 0`; no PoP/username needed. For **Security 2** (SRP6a + AES-GCM), set `ble.security: 2` and either pre-configure `proofOfPossession` (SRP password) + `username`, or set `promptForAuth: true` so users enter both in the wizard. Set `promptForAuth: true` whenever each device has a unique PoP/credentials (e.g. printed on a label) and you don't want to ship one app per device.
+Default is **Security 1** (X25519 + AES-CTR + PoP) with PoP `"abcd1234"` — matches the `esp_wifi_config` example's default (security is a runtime field in `wifi_cfg_prov_config_t`, set in the firmware's `main.c`, not a Kconfig option). The user will likely want to change the PoP string.  For **Security 0** (no encryption), set `ble.security: 0`; no PoP/username needed. For **Security 2** (SRP6a + AES-GCM), set `ble.security: 2` and either pre-configure `proofOfPossession` (SRP password) + `username`, or set `promptForAuth: true` so users enter both in the wizard. Set `promptForAuth: true` whenever each device has a unique PoP/credentials (e.g. printed on a label) and you don't want to ship one app per device.
+
+> **Security 2 is also a firmware-side requirement.** The device won't start the Sec2 manager
+> unless a pre-computed SRP6a salt + verifier are compiled into the firmware (the raw PoP is not
+> enough — SRP6a stores a verifier, not the password). Generate offline, e.g.
+> `esp_prov.py --transport ble --sec_ver 2 --sec2_gen_cred --sec2_username <user> --sec2_pwd <pw>`,
+> embed in firmware, and have the app authenticate with that same username + password. If you only
+> set `ble.security: 2` in the app but the firmware has no salt/verifier, the device fails to start
+> provisioning and never advertises. See `bluetooth_spec.md` §18.1.
 
 Pass to `<ProvisioningNavigator config={...} />` or `initializeServices(config)` once before any hook usage.
 

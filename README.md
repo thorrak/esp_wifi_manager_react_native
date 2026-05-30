@@ -243,6 +243,15 @@ The library defaults to **Security 1** (X25519 + AES-CTR + PoP) with PoP `abcd12
 
 For Security 2 specifically: the SDK's connect call takes `(pop, _, username)`, so `proofOfPossession` is reused as the SRP password.
 
+> **Security 2 needs a device-side salt + verifier (firmware config, not app config).** The
+> `esp_wifi_config` firmware refuses to start the Security 2 provisioning manager unless a
+> pre-computed SRP6a **salt** and **verifier** are compiled in — the raw PoP alone is not enough
+> (SRP6a stores a password-derived verifier, never the password). Generate them offline from your
+> chosen username + password and embed the bytes in firmware, e.g.
+> `esp_prov.py --transport ble --sec_ver 2 --sec2_gen_cred --sec2_username <user> --sec2_pwd <pw>`.
+> The app then connects with that same `username` + `proofOfPossession` (the password). Security 0
+> and 1 need nothing extra on the device.
+
 ## Error handling
 
 Single envelope, no field-merging:
@@ -358,7 +367,7 @@ npm run build  # CommonJS + ESM + .d.ts
 - [examples/](./examples/) — complete copy-pasteable files
 - [API.md](./API.md) — exhaustive symbol reference
 - [ARCHITECTURE.md](./ARCHITECTURE.md) — internal layering and event flow
-- [bluetooth-provisioning.md](./bluetooth-provisioning.md) — BLE protocol spec
+- [bluetooth_spec.md](./bluetooth_spec.md) — BLE provisioning protocol spec (byte-level, hardware-verified)
 - [CHANGELOG.md](./CHANGELOG.md) — version history
 
 ## License

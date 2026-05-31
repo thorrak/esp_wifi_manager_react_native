@@ -341,7 +341,21 @@ export class DeviceProtocol extends TypedEventEmitter<DeviceProtocolEvents> {
     return this.sendJson<T>(endpoint, undefined);
   }
 
-  private callVars(req: VarsRequest): Promise<VarsResponse> {
-    return this.sendJson<VarsResponse>(PROV_ENDPOINT_VARS, req);
+  private async callVars(req: VarsRequest): Promise<VarsResponse> {
+    const resp = await this.sendJson<VarsResponse>(PROV_ENDPOINT_VARS, req);
+    // Surface firmware-side rejections. `not_found` / `missing_key` are
+    // normal control-flow for get/del and stay quiet; everything else
+    // (`rejected`, `store_full`, `missing_key_or_value`, `unknown_op`, …)
+    // means the device refused the operation — log it, since otherwise the
+    // reason is buried inside the Error thrown by the caller.
+    if (
+      'error' in resp &&
+      resp.error !== 'not_found' &&
+      resp.error !== 'missing_key'
+    ) {
+      const op = 'op' in req ? req.op : '?';
+      log.warn(`vars op=${op} rejected by device: ${resp.error}`);
+    }
+    return resp;
   }
 }

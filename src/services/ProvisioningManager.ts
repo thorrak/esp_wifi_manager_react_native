@@ -449,12 +449,22 @@ export class ProvisioningManager extends TypedEventEmitter<ProvisioningManagerEv
 
     this.emit('provisionResult', result);
     this.setStep('success');
+
+    // Best-effort: grab the device's assigned IP/network details over the
+    // still-open BLE link before it tears down. Never let this fail an
+    // otherwise-successful provision — waitForNetworkInfo swallows its own
+    // errors and returns null, and we keep the budget under the firmware's
+    // post-success reboot backstop (~15 s).
+    const networkInfo =
+      (await this.protocol.waitForNetworkInfo()) ?? undefined;
+
     const provisionResult: ProvisioningResult = {
       success: true,
       ssid: result.ssid,
       provisionStatus: result.status,
       deviceName: this.transport.connectedDevice?.name,
       deviceId: this.transport.connectedDevice?.id,
+      networkInfo,
     };
     this.emit('provisioningComplete', provisionResult);
   }

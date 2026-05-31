@@ -9,6 +9,7 @@ export const PROV_ENDPOINT_VERSION = 'esp-wifi-config-version';
 export const PROV_ENDPOINT_CAPABILITIES = 'esp-wifi-config-capabilities';
 export const PROV_ENDPOINT_VARS = 'esp-wifi-config-vars';
 export const PROV_ENDPOINT_NETWORK_POLICY = 'esp-wifi-config-network-policy';
+export const PROV_ENDPOINT_NETWORK_INFO = 'esp-wifi-config-network-info';
 
 /** Default timeout for a custom-endpoint round-trip (ms). */
 export const DEFAULT_ENDPOINT_TIMEOUT_MS = 8000;

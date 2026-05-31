@@ -22,6 +22,7 @@ import {
 import type {
   DeviceCapabilities,
   DeviceNetworkPolicy,
+  DeviceNetworkInfo,
   DeviceProtocolConfig,
   DeviceProtocolEvents,
   DeviceVariable,
@@ -38,6 +39,7 @@ import {
   PROV_ENDPOINT_CAPABILITIES,
   PROV_ENDPOINT_VARS,
   PROV_ENDPOINT_NETWORK_POLICY,
+  PROV_ENDPOINT_NETWORK_INFO,
   DEFAULT_ENDPOINT_TIMEOUT_MS,
   DEFAULT_WIFI_SCAN_TIMEOUT_MS,
   DEFAULT_PROVISION_TIMEOUT_MS,
@@ -90,6 +92,14 @@ function withTimeout<T>(
   return Promise.race([promise, timeout]).finally(() => {
     if (timer !== null) clearTimeout(timer);
   });
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function toMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
 }
 
 // ---------------------------------------------------------------------------
@@ -195,6 +205,46 @@ export class DeviceProtocol extends TypedEventEmitter<DeviceProtocolEvents> {
     return this.readJsonEndpoint<DeviceNetworkPolicy>(
       PROV_ENDPOINT_NETWORK_POLICY,
     );
+  }
+
+  /**
+   * Read the station's assigned network details (IP, gateway, RSSI, …) from
+   * `esp-wifi-config-network-info`. Call right after a successful provision(),
+   * while the BLE link is still up — the device tears down provisioning once
+   * the client disconnects.
+   *
+   * One round-trip. May report `{ connected: false }` if GOT_IP hasn't landed
+   * yet; use {@link waitForNetworkInfo} to poll until the IP is assigned.
+   */
+  async getNetworkInfo(): Promise<DeviceNetworkInfo> {
+    return this.readJsonEndpoint<DeviceNetworkInfo>(PROV_ENDPOINT_NETWORK_INFO);
+  }
+
+  /**
+   * Poll {@link getNetworkInfo} until the station reports `connected: true`
+   * (IP assigned) or the attempts are exhausted. Best-effort: returns the last
+   * response even if still unconnected, and resolves `null` if every attempt
+   * threw (e.g. firmware predates the endpoint, or BLE dropped). Never throws —
+   * a missing IP must not fail an otherwise-successful provision.
+   *
+   * Keep the budget well under the firmware's post-success reboot backstop
+   * (~15 s): default 3 attempts × 1 s ≈ 2 s of waiting plus round-trips.
+   */
+  async waitForNetworkInfo(
+    attempts = 3,
+    intervalMs = 1000,
+  ): Promise<DeviceNetworkInfo | null> {
+    let last: DeviceNetworkInfo | null = null;
+    for (let i = 0; i < attempts; i++) {
+      try {
+        last = await this.getNetworkInfo();
+        if (last.connected) return last;
+      } catch (err) {
+        log.warn('network-info attempt failed:', toMessage(err));
+      }
+      if (i < attempts - 1) await delay(intervalMs);
+    }
+    return last;
   }
 
   // ---- Custom variable store ------------------------------------------------

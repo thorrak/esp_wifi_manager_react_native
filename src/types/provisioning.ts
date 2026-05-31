@@ -23,7 +23,7 @@
 
 import type { ScannedNetwork, ProvisionResult } from './wifi';
 import type { BleTransportConfig, SecurityVersion } from './ble';
-import type { DeviceProtocolConfig } from './protocol';
+import type { DeviceProtocolConfig, DeviceNetworkInfo } from './protocol';
 import type { DeviceProtocol } from '../services/DeviceProtocol';
 import type { BleTransport } from '../services/BleTransport';
 
@@ -139,13 +139,22 @@ export interface ProvisioningResult {
   success: boolean;
   ssid?: string;
   /**
-   * Raw status string returned by the SDK's `provision()` call. The native
-   * layer does not surface the device's IP — fetch it from your device
-   * over Wi-Fi after provisioning if you need it.
+   * Raw status string returned by the SDK's `provision()` call.
    */
   provisionStatus?: string;
   deviceName?: string;
   deviceId?: string;
+  /**
+   * Station network details (IP, gateway, RSSI, …) read from the device's
+   * `esp-wifi-config-network-info` endpoint immediately after provisioning,
+   * while the BLE link is still up.
+   *
+   * Best-effort: `undefined` if the fetch was skipped, the firmware predates
+   * the endpoint, or the device dropped BLE before the IP was assigned. When
+   * present but `connected: false`, the IP had not yet been assigned within
+   * the retry window. A missing value never means provisioning failed.
+   */
+  networkInfo?: DeviceNetworkInfo;
 }
 
 // ---------------------------------------------------------------------------

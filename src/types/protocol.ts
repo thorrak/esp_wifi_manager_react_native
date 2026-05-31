@@ -46,6 +46,39 @@ export interface DeviceNetworkPolicy {
   [key: string]: unknown;
 }
 
+/**
+ * Station network details from `esp-wifi-config-network-info`, read right
+ * after a successful provision() to surface the device's assigned IP without
+ * an extra round-trip over Wi-Fi.
+ *
+ * While the device is still associating (IP not yet assigned) the firmware
+ * returns only `{ connected: false }`, so every other field is optional.
+ */
+export interface DeviceNetworkInfo {
+  /** True once the station has an IP. When false, treat the rest as absent. */
+  connected: boolean;
+  ssid?: string;
+  /** IPv4 address, e.g. "192.168.1.100". */
+  ip?: string;
+  netmask?: string;
+  gateway?: string;
+  dns?: string;
+  /** Station MAC, colon-delimited uppercase. */
+  mac?: string;
+  /** Connected AP BSSID, colon-delimited uppercase. */
+  bssid?: string;
+  hostname?: string;
+  /** Signal strength in dBm (negative). */
+  rssi?: number;
+  /** Signal quality 0–100%. */
+  quality?: number;
+  channel?: number;
+  /** Milliseconds since the station connected. */
+  uptime_ms?: number;
+  /** Catch-all for forward-compat fields. */
+  [key: string]: unknown;
+}
+
 /** Vars endpoint request union. See firmware schema in esp_wifi_config_prov_ble.c. */
 export type VarsRequest =
   | { op: 'list' }

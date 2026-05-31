@@ -299,33 +299,46 @@ export class DeviceProtocol extends TypedEventEmitter<DeviceProtocolEvents> {
         endpoint,
       );
 
-      // Some native bridges return the raw UTF-8 string instead of base64.
-      // Try base64-decode first; fall back to using the string as-is.
-      let responseStr: string;
-      try {
-        responseStr = Buffer.from(responseB64, 'base64').toString('utf-8');
-        // Heuristic: if the decoded body is empty but the input wasn't, the
-        // SDK probably already gave us the decoded string.
-        if (!responseStr && responseB64) {
-          responseStr = responseB64;
-        }
-      } catch {
-        responseStr = responseB64;
-      }
-
-      if (!responseStr) {
+      if (!responseB64) {
         throw new Error(`Empty response from ${endpoint}`);
       }
 
-      try {
-        return JSON.parse(responseStr) as TRes;
-      } catch (err) {
-        throw new Error(
-          `Invalid JSON response from ${endpoint}: ${
-            err instanceof Error ? err.message : String(err)
-          }`,
-        );
+      // The native bridge normally returns base64 of the endpoint's raw bytes,
+      // but some bridges/paths hand back the UTF-8 string directly. Crucially,
+      // Buffer.from(x, 'base64') NEVER throws — it silently drops non-base64
+      // chars — so base64-decoding a raw JSON string yields garbage rather than
+      // an error. Don't trust a single interpretation: try base64-decode AND
+      // the raw string, and accept whichever actually parses as JSON.
+      const candidates: string[] = [];
+      const decoded = Buffer.from(responseB64, 'base64').toString('utf-8');
+      if (decoded) candidates.push(decoded);
+      candidates.push(responseB64);
+
+      let lastParseErr: unknown;
+      for (const candidate of candidates) {
+        const trimmed = candidate.trim();
+        if (!trimmed) continue;
+        try {
+          return JSON.parse(trimmed) as TRes;
+        } catch (err) {
+          lastParseErr = err;
+        }
       }
+
+      // Neither interpretation parsed — surface the raw payload (truncated) so
+      // the actual bytes on the wire are diagnosable instead of just the parser
+      // complaint about one mangled character.
+      const snippet = (s: string) =>
+        s.length > 160 ? `${s.slice(0, 160)}…(${s.length})` : s;
+      throw new Error(
+        `Invalid JSON response from ${endpoint}: ${
+          lastParseErr instanceof Error
+            ? lastParseErr.message
+            : String(lastParseErr)
+        } | rawB64=${JSON.stringify(snippet(responseB64))} | decoded=${JSON.stringify(
+          snippet(decoded),
+        )}`,
+      );
     } catch (err) {
       const error = err instanceof Error ? err : new Error(String(err));
       log.warn(`Endpoint ${endpoint} failed:`, error.message);

@@ -44,7 +44,6 @@ import {
 } from '../constants/protocol';
 
 import { TypedEventEmitter, createLogger } from '../utils';
-import { Buffer } from 'buffer';
 
 import type { BleTransport } from './BleTransport';
 
@@ -288,57 +287,42 @@ export class DeviceProtocol extends TypedEventEmitter<DeviceProtocolEvents> {
     // endpoints (version/capabilities/network-policy) ignore the body but
     // still need at least one byte — send "{}" for an empty request.
     // (Hardware-verified; see bluetooth_spec.md §12 and §18.5.)
+    //
+    // Do NOT base64-encode here. `ESPDevice.sendData()` already base64-encodes
+    // the request and base64-decodes the response internally — it takes and
+    // returns plain UTF-8 strings. Encoding ourselves would double-encode: the
+    // device would receive base64 *text* instead of JSON (→ firmware
+    // "bad_json"), and the response would be a still-base64 string we'd then
+    // mangle by decoding twice.
     const requestStr = body === undefined ? '{}' : JSON.stringify(body);
-    const requestB64 = Buffer.from(requestStr, 'utf-8').toString('base64');
 
     this.setBusy(true);
     try {
-      const responseB64: string = await withTimeout(
-        device.sendData(endpoint, requestB64),
+      const responseStr: string = await withTimeout(
+        device.sendData(endpoint, requestStr),
         ms,
         endpoint,
       );
 
-      if (!responseB64) {
+      if (!responseStr || !responseStr.trim()) {
         throw new Error(`Empty response from ${endpoint}`);
       }
 
-      // The native bridge normally returns base64 of the endpoint's raw bytes,
-      // but some bridges/paths hand back the UTF-8 string directly. Crucially,
-      // Buffer.from(x, 'base64') NEVER throws — it silently drops non-base64
-      // chars — so base64-decoding a raw JSON string yields garbage rather than
-      // an error. Don't trust a single interpretation: try base64-decode AND
-      // the raw string, and accept whichever actually parses as JSON.
-      const candidates: string[] = [];
-      const decoded = Buffer.from(responseB64, 'base64').toString('utf-8');
-      if (decoded) candidates.push(decoded);
-      candidates.push(responseB64);
-
-      let lastParseErr: unknown;
-      for (const candidate of candidates) {
-        const trimmed = candidate.trim();
-        if (!trimmed) continue;
-        try {
-          return JSON.parse(trimmed) as TRes;
-        } catch (err) {
-          lastParseErr = err;
-        }
+      try {
+        return JSON.parse(responseStr.trim()) as TRes;
+      } catch (err) {
+        // Surface the raw payload (truncated) so the actual bytes on the wire
+        // are diagnosable, not just the parser's complaint about one character.
+        const snippet =
+          responseStr.length > 160
+            ? `${responseStr.slice(0, 160)}…(${responseStr.length})`
+            : responseStr;
+        throw new Error(
+          `Invalid JSON response from ${endpoint}: ${
+            err instanceof Error ? err.message : String(err)
+          } | raw=${JSON.stringify(snippet)}`,
+        );
       }
-
-      // Neither interpretation parsed — surface the raw payload (truncated) so
-      // the actual bytes on the wire are diagnosable instead of just the parser
-      // complaint about one mangled character.
-      const snippet = (s: string) =>
-        s.length > 160 ? `${s.slice(0, 160)}…(${s.length})` : s;
-      throw new Error(
-        `Invalid JSON response from ${endpoint}: ${
-          lastParseErr instanceof Error
-            ? lastParseErr.message
-            : String(lastParseErr)
-        } | rawB64=${JSON.stringify(snippet(responseB64))} | decoded=${JSON.stringify(
-          snippet(decoded),
-        )}`,
-      );
     } catch (err) {
       const error = err instanceof Error ? err : new Error(String(err));
       log.warn(`Endpoint ${endpoint} failed:`, error.message);

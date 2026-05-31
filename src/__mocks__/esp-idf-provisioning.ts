@@ -79,6 +79,11 @@ export class ESPDevice {
     this.connected = true;
   }
 
+  // Mirrors orbital's ESPDevice.sendData: raw string in, raw string out. The
+  // real implementation base64-encodes the request and base64-decodes the
+  // response *internally*, so callers (DeviceProtocol) must pass/receive plain
+  // UTF-8 — never pre-base64. Keep this a passthrough so tests catch
+  // double-encoding regressions.
   async sendData(path: string, data: string): Promise<string> {
     if (mockHooks.sendData) return mockHooks.sendData(path, data);
     return '';

@@ -16,7 +16,6 @@ import {
   ESPTransport,
   ESPWifiAuthMode,
 } from '../__mocks__/esp-idf-provisioning';
-import { Buffer } from 'buffer';
 
 describe('ProvisioningManager (SDK-backed)', () => {
   beforeEach(() => {
@@ -317,15 +316,19 @@ describe('ProvisioningManager (SDK-backed)', () => {
   // Custom protocomm endpoint encoding
   // -------------------------------------------------------------------------
 
-  it('encodes vars endpoint as JSON-over-base64', async () => {
+  it('sends vars requests as plain JSON (ESPDevice.sendData owns base64 framing)', async () => {
+    // Regression: DeviceProtocol must NOT base64-encode the request itself.
+    // `ESPDevice.sendData()` already base64-encodes the request and decodes the
+    // response internally (raw string in, raw string out — the mock mirrors
+    // that). Encoding here too would double-encode and the device would receive
+    // base64 text instead of JSON (firmware → "bad_json").
     let captured: { path: string; data: string } | null = null;
     mockHooks.search = (prefix) => [
       new ESPDevice({ name: prefix + 'X', transport: ESPTransport.ble, security: ESPSecurity.secure }),
     ];
     mockHooks.sendData = async (path, data) => {
       captured = { path, data };
-      const okBody = JSON.stringify({ ok: true });
-      return Buffer.from(okBody, 'utf-8').toString('base64');
+      return JSON.stringify({ ok: true }); // raw JSON, as the device returns it
     };
 
     const transport = new BleTransport({ deviceNamePrefix: 'PROV_' });
@@ -337,8 +340,8 @@ describe('ProvisioningManager (SDK-backed)', () => {
 
     expect(captured).not.toBeNull();
     expect(captured!.path).toBe('esp-wifi-config-vars');
-    const decoded = Buffer.from(captured!.data, 'base64').toString('utf-8');
-    expect(JSON.parse(decoded)).toEqual({
+    // The device receives raw JSON, parseable directly — no extra base64 layer.
+    expect(JSON.parse(captured!.data)).toEqual({
       op: 'set',
       key: 'mdns_name',
       value: 'demo',

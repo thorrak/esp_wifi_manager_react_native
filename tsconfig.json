@@ -23,5 +23,5 @@
     "target": "ESNext",
     "verbatimModuleSyntax": false
   },
-  "exclude": ["lib", "node_modules", "esp_wifi_config_vue", "examples"]
+  "exclude": ["lib", "node_modules", "examples", "example_app", "harness"]
 }

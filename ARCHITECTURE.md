@@ -60,11 +60,13 @@ Sits on the connected `ESPDevice`. Two kinds of operations:
 
 - **SDK-native:** `scanWifi()` (→ `scanWifiList()`) and `provision(ssid, password)` (→ the SDK's
   atomic `provision()`, which sends credentials *and* waits for the device's STA-connect result).
-- **Custom protocomm endpoints** registered by `esp_wifi_config` firmware:
-  `getVersion()`, `getCapabilities()`, `getNetworkPolicy()`, `listVars()`, `getVar()`, `setVar()`,
-  `delVar()`. These exchange UTF-8 JSON, base64-framed through `ESPDevice.sendData()` (the SDK
-  applies protocomm encryption). Empty requests are sent as `{}` — a zero-length write is not
-  dispatched by the ESP32 protocomm BLE transport.
+- **Custom protocomm endpoints** registered by `esp_wifi_config` firmware (five, always-on):
+  `getVersion()`, `getCapabilities()`, `getNetworkPolicy()`, `getNetworkInfo()` /
+  `waitForNetworkInfo()`, `listVars()`, `getVar()`, `setVar()`, `delVar()`. These exchange UTF-8
+  JSON, base64-framed through `ESPDevice.sendData()` (the SDK applies protocomm encryption). Empty
+  requests are sent as `{}` — a zero-length write is not dispatched by the ESP32 protocomm BLE
+  transport. `esp-wifi-config-network-info` is reachable only on firmware 0.2.0+ (0.1.0 registered
+  the handler without creating its GATT characteristic).
 
 Custom-endpoint calls only work while the BLE session is alive (between `connect()` and the device
 dropping BLE after a successful provision). The layer surfaces a `busyChanged` event for UI
@@ -78,7 +80,9 @@ Owns the wizard **step machine** and orchestrates Layers 1–2. It is the single
 
 - **No connection poller.** The SDK's `provision()` is atomic, so the `joiningWifi` step resolves
   directly off that promise — success → `success`, rejection → a recoverable `provision`-source
-  error.
+  error. On success the manager then calls `protocol.waitForNetworkInfo()` (3 × 1 s, never throws)
+  to capture the device's IP over the still-open BLE link before the firmware's ~15 s reboot
+  backstop, and emits `provisioningComplete` with it as `result.networkInfo`.
 - **Disconnect-safety.** A set of steps (`welcome`, `scanBle`, `enterDeviceAuth`, `connectingBle`,
   `joiningWifi`, `success`) are exempt from the "BLE dropped → fatal" rule. `joiningWifi` is exempt
   because the firmware reboots on a successful provision and drops BLE as the client disconnects,

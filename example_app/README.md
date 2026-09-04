@@ -1,6 +1,6 @@
 # EspWifiReactTest
 
-Example app demonstrating [esp-wifi-config-react-native](https://github.com/thorrak/esp_wifi_config_react_native) — a React Native library for BLE-based WiFi provisioning of ESP32 devices running [esp_wifi_config](https://github.com/thorrak/esp_wifi_config) firmware (≥ 0.1.0).
+Example app demonstrating [esp-wifi-config-react-native](https://github.com/thorrak/esp_wifi_config_react_native) — a React Native library for BLE-based WiFi provisioning of ESP32 devices running [esp_wifi_config](https://github.com/thorrak/esp_wifi_config) firmware (≥ 0.2.0; 0.2.3 recommended).
 
 The library wraps Espressif's official iOS / Android provisioning SDKs via [`@orbital-systems/react-native-esp-idf-provisioning`](https://www.npmjs.com/package/@orbital-systems/react-native-esp-idf-provisioning) and speaks ESP-IDF Network Provisioning over BLE.
 
@@ -135,7 +135,7 @@ You must use `expo run:ios` or `expo run:android` (dev builds). **Expo Go does n
 
 ## Key Points
 
-- **Firmware**: requires `esp_wifi_config` ≥ 0.1.0 with `CONFIG_WIFI_CFG_ENABLE_NETWORK_PROVISIONING=y`.
+- **Firmware**: requires `esp_wifi_config` ≥ 0.2.0 with `CONFIG_WIFI_CFG_ENABLE_NETWORK_PROVISIONING=y` (0.2.3 recommended; on 0.1.0 the network-details card stays empty because that firmware never exposed `esp-wifi-config-network-info`).
 - **Dev builds only** — the orbital-systems SDK is a native module. Use `expo run:ios` / `expo run:android`, not `expo start`.
 - **iOS deployment target** — must be at least 15.1 for Expo SDK 54. Set via `expo-build-properties`.
 - **`neverForLocation: true`** — tells iOS that BLE is not used for location tracking, avoiding a location permission prompt.

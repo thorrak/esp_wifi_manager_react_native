@@ -1,6 +1,6 @@
 # esp-wifi-config-react-native
 
-> React Native library for ESP-IDF Network Provisioning over BLE on devices running esp_wifi_config 0.1.0+ firmware. Three integration paths: pre-built navigator, hooks-only custom UI, or headless service classes. Step-machine driven; one error envelope; per-instance hook loading. Wraps Espressif's native iOS/Android SDK via @orbital-systems/react-native-esp-idf-provisioning.
+> React Native library for ESP-IDF Network Provisioning over BLE on devices running esp_wifi_config 0.2.0+ firmware (0.2.3 recommended). Three integration paths: pre-built navigator, hooks-only custom UI, or headless service classes. Step-machine driven; one error envelope; per-instance hook loading. Wraps Espressif's native iOS/Android SDK via @orbital-systems/react-native-esp-idf-provisioning.
 
 If you are an AI agent helping integrate or modify this library, read CLAUDE.md first.
 
@@ -11,6 +11,7 @@ If you are an AI agent helping integrate or modify this library, read CLAUDE.md 
 - [API.md](API.md): Exhaustive symbol reference. When there's any conflict, prefer CLAUDE.md and the source.
 - [ARCHITECTURE.md](ARCHITECTURE.md): Internal layering and event flow for contributors. The integration-level model lives in CLAUDE.md.
 - [CHANGELOG.md](CHANGELOG.md): Release notes.
+- [MIGRATION.md](MIGRATION.md): Firmware-version alignment (what changed in esp_wifi_config 0.1.0 → 0.2.3 and how the library tracks it) plus the checklist for migrating an app from an earlier draft of this library.
 
 ## Guides
 
@@ -21,12 +22,11 @@ If you are an AI agent helping integrate or modify this library, read CLAUDE.md 
 - [GUIDES/03-headless-usage.md](GUIDES/03-headless-usage.md): BleTransport + DeviceProtocol in non-React code.
 - [GUIDES/04-pre-wifi-customization.md](GUIDES/04-pre-wifi-customization.md): Using onConnected to set hostname or app variables before WiFi.
 - [GUIDES/05-error-handling.md](GUIDES/05-error-handling.md): The unified ProvisioningError model in depth, including the unauthorized-bounce path.
-- [GUIDES/06-managing-saved-networks.md](GUIDES/06-managing-saved-networks.md): Why post-provisioning management is over HTTP/REST, not BLE.
+- [GUIDES/06-managing-saved-networks.md](GUIDES/06-managing-saved-networks.md): Why post-provisioning management is over HTTP/REST, not BLE; the network-info endpoint; chunked responses and SoftAP-less builds.
 - [GUIDES/07-testing-your-integration.md](GUIDES/07-testing-your-integration.md): Mocking the native SDK for unit tests.
 
 ## Examples
 
-- [example_app/](example_app/): Full runnable Expo app — `ProvisioningNavigator` flow (app/provision.tsx) plus a Diagnostics tab exercising BleTransport/DeviceProtocol/custom endpoints. Links the library via `file:..`.
 - [example_app/](example_app/): Full runnable Expo app — `ProvisioningNavigator` flow (app/provision.tsx) plus a Diagnostics tab exercising BleTransport/DeviceProtocol/custom endpoints. Links the library via `file:..`.
 - [examples/minimal-app.tsx](examples/minimal-app.tsx): Bare ProvisioningNavigator inside Expo Router.
 - [examples/custom-wizard.tsx](examples/custom-wizard.tsx): Hooks-driven wizard, ~200 lines.

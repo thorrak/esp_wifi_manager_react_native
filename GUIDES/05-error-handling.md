@@ -35,6 +35,7 @@ type ProvisioningError = {
 | `unsupported` | `ble` | BLE not supported on this device |
 | `scan_error` | `ble` | Scan API returned an error |
 | `connect_error` | `ble` | Generic BLE connect failure not classified as `unauthorized` |
+| `missing_credentials` | `ble` | `BleTransport.connect()` called for Security 1/2 with no PoP configured and none supplied. Headless callers only — the wizard prompts first (and would bounce to `enterDeviceAuth` if it ever saw this). Pass `''` for a Security 1 device that has no PoP. |
 | `connection_lost` | `ble` | Unexpected mid-flow BLE disconnect on a step that is *not* disconnect-safe |
 | `provision_failed` | `provision` | The SDK's `provision()` rejected — typically a wrong WiFi password or the AP being unreachable |
 | `no_network` | `flow` | `submitPassword` called with no `selectedNetwork` |

@@ -26,8 +26,10 @@ export type {
   DeviceAuthCredentials,
   // Protocol
   DeviceVersionInfo,
+  DeviceCapability,
   DeviceCapabilities,
   DeviceVariable,
+  DeviceProvisioningMode,
   DeviceNetworkPolicy,
   DeviceNetworkInfo,
   VarsRequest,
@@ -59,7 +61,6 @@ export {
   DEFAULT_POP,
   DEFAULT_SECURITY2_USERNAME,
   DEFAULT_SCAN_TIMEOUT_MS,
-  DEFAULT_SDK_TIMEOUT_MS,
 } from './constants/ble';
 export {
   PROV_ENDPOINT_VERSION,

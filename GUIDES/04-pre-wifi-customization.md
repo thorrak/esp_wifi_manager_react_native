@@ -121,7 +121,7 @@ Then your custom configure screen calls `resolveProceed()` when the user is done
 
 ## Recipe — validate firmware version
 
-The `esp-wifi-config-version` endpoint surfaces `lib` (library version), `idf` (ESP-IDF version), `fw_version` (app version), and `app` (project name). Read it via `protocol.getVersion()`:
+The `esp-wifi-config-version` endpoint surfaces `lib` (library banner), `idf` (ESP-IDF version), `fw_version` (the app's `esp_app_desc_t.version`), `app` (project name), `compile_time`, `chip`, and — if the firmware sets `prov_ble.firmware_version` — `firmware_version`. Gate on `fw_version` or `firmware_version`, **not** `lib`: in esp_wifi_config 0.1.0 through 0.2.3 the `lib` string is hardcoded to `"esp_wifi_config 0.1.0"` regardless of the component version. Read it via `protocol.getVersion()`:
 
 ```ts
 config={{

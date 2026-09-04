@@ -39,7 +39,6 @@ import { BleLibraryError } from '../types/ble';
 import {
   DEVICE_NAME_PREFIX,
   DEFAULT_SCAN_TIMEOUT_MS,
-  DEFAULT_POP,
   DEFAULT_SECURITY2_USERNAME,
 } from '../constants/ble';
 
@@ -51,7 +50,12 @@ interface ResolvedConfig {
   deviceNamePrefixes: string[];
   scanTimeoutMs: number;
   security: SecurityVersion;
-  proofOfPossession: string;
+  /**
+   * No default. `undefined` = not configured (wizard prompts; headless
+   * `connect()` throws `missing_credentials`). `''` = the device runs
+   * Security 1 with no PoP and connects without prompting.
+   */
+  proofOfPossession: string | undefined;
   username: string;
   promptForAuth: boolean;
 }
@@ -66,7 +70,7 @@ function resolveConfig(config?: BleTransportConfig): ResolvedConfig {
     deviceNamePrefixes: normalizePrefixes(config?.deviceNamePrefix),
     scanTimeoutMs: config?.scanTimeoutMs ?? DEFAULT_SCAN_TIMEOUT_MS,
     security: config?.security ?? 1,
-    proofOfPossession: config?.proofOfPossession ?? DEFAULT_POP,
+    proofOfPossession: config?.proofOfPossession,
     username: config?.username ?? DEFAULT_SECURITY2_USERNAME,
     promptForAuth: config?.promptForAuth ?? false,
   };
@@ -296,6 +300,28 @@ export class BleTransport extends TypedEventEmitter<BleTransportEvents> {
       this.stopScan();
     }
 
+    const pop = overrides?.pop ?? this.config.proofOfPossession;
+    const username =
+      this.config.security === 2
+        ? overrides?.username ?? this.config.username
+        : null;
+
+    // Nothing configured and nothing supplied. The wizard never gets here —
+    // ProvisioningManager inserts `enterDeviceAuth` first — so this is for
+    // headless callers, who must say what they mean: a PoP, or `''` for a
+    // device that runs Security 1 without one. Refusing up front beats
+    // letting the native SDK fail the handshake with a generic message.
+    if (this.config.security !== 0 && pop === undefined) {
+      this.setConnectionState('disconnected');
+      throw new BleLibraryError(
+        'missing_credentials',
+        this.config.security === 1
+          ? "Security 1 needs a proof-of-possession: set ble.proofOfPossession " +
+            "(use '' for a device configured with no PoP) or pass { pop } to connect()"
+          : 'Security 2 needs an SRP password: set ble.proofOfPossession or pass { pop } to connect()',
+      );
+    }
+
     this.setConnectionState('connecting');
 
     const device = new ESPDevice({
@@ -304,14 +330,12 @@ export class BleTransport extends TypedEventEmitter<BleTransportEvents> {
       security: toEspSecurity(this.config.security),
     });
 
-    const pop = overrides?.pop ?? this.config.proofOfPossession;
-    const username =
-      this.config.security === 2
-        ? overrides?.username ?? this.config.username
-        : null;
-
     try {
-      await device.connect(pop, null, username);
+      // Security 0 has no PoP; `''` (no-PoP Security 1) goes through as-is —
+      // both the firmware and the native SDKs skip the PoP mixing step for an
+      // empty value, and the iOS SDK additionally honours the device's
+      // advertised `no_pop` capability.
+      await device.connect(pop ?? null, null, username);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       log.error('Connect failed:', message);

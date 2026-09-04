@@ -424,7 +424,7 @@ export default function DiagnosticsScreen() {
     <ScrollView style={styles.container} contentContainerStyle={styles.contentContainer}>
       <Text style={styles.title}>Diagnostics</Text>
       <Text style={styles.subtitle}>
-        Exercises BleTransport / DeviceProtocol against esp_wifi_config 0.1.0+
+        Exercises BleTransport / DeviceProtocol against esp_wifi_config 0.2.0+
       </Text>
 
       {/* Step 1: Permissions */}

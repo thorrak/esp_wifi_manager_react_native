@@ -32,12 +32,22 @@ export function SuccessScreen({ theme, onComplete }: SuccessScreenProps) {
     cancel,
   } = useProvisioning();
 
-  // The SDK's provision() doesn't return the device IP — we surface the
-  // SSID and the SDK status string ("success", typically) instead. Apps
-  // that need the IP can fetch it over Wi-Fi after provisioning lands.
+  // The SDK's provision() doesn't return the device IP, so the manager reads
+  // it from the firmware's `esp-wifi-config-network-info` endpoint right
+  // after a successful join and stores it on `lastResult.networkInfo`
+  // (best-effort — absent on firmware < 0.2.0 or if BLE dropped first).
   const ssid = lastResult?.ssid || lastProvisionResult?.ssid;
   const status = lastProvisionResult?.status ?? lastResult?.provisionStatus;
   const deviceName = lastResult?.deviceName ?? device?.name;
+  const net = lastResult?.networkInfo;
+  const networkRows: Array<{ label: string; value: string }> = [];
+  if (net?.connected) {
+    if (net.ip) networkRows.push({ label: 'IP address', value: net.ip });
+    if (net.hostname) networkRows.push({ label: 'Hostname', value: net.hostname });
+    if (typeof net.rssi === 'number') {
+      networkRows.push({ label: 'Signal', value: `${net.rssi} dBm` });
+    }
+  }
 
   const handleDone = () => {
     if (onComplete) onComplete();
@@ -105,6 +115,25 @@ export function SuccessScreen({ theme, onComplete }: SuccessScreenProps) {
               </View>
             </>
           ) : null}
+
+          {networkRows.map((row) => (
+            <View key={row.label}>
+              <View style={[styles.divider, { backgroundColor: c.border }]} />
+              <View style={styles.detailRow}>
+                <Text
+                  style={[styles.detailLabel, { color: c.textSecondary }]}
+                >
+                  {row.label}
+                </Text>
+                <Text
+                  style={[styles.detailValue, { color: c.text }]}
+                  selectable
+                >
+                  {row.value}
+                </Text>
+              </View>
+            </View>
+          ))}
         </View>
 
         <TouchableOpacity

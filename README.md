@@ -2,7 +2,7 @@
 
 BLE-based Wi-Fi provisioning for ESP32 devices from React Native apps.
 
-Talks to ESP32 devices running [esp_wifi_config](https://github.com/thorrak/esp_wifi_config) **0.1.0+** firmware via ESP-IDF's official Wi-Fi/Network Provisioning protocol over BLE, drives a 10-step state machine, and ships pre-built screens you can drop in or replace.
+Talks to ESP32 devices running [esp_wifi_config](https://github.com/thorrak/esp_wifi_config) **0.2.0+** firmware (0.2.3 recommended) via ESP-IDF's official Wi-Fi/Network Provisioning protocol over BLE, drives a 10-step state machine, and ships pre-built screens you can drop in or replace.
 
 It wraps Espressif's native iOS/Android provisioning SDKs via
 [`@orbital-systems/react-native-esp-idf-provisioning`](https://www.npmjs.com/package/@orbital-systems/react-native-esp-idf-provisioning),
@@ -193,8 +193,8 @@ type ProvisioningConfig = {
     deviceNamePrefix?: string | string[];   // default 'PROV_'
     scanTimeoutMs?: number;                  // default 10000
     security?: 0 | 1 | 2;                    // default 1
-    proofOfPossession?: string;              // default 'abcd1234' (sec1 PoP, sec2 SRP password)
-    username?: string;                       // sec2 only, default 'wificfg'
+    proofOfPossession?: string;              // sec1 PoP / sec2 SRP password. No default: unset → wizard prompts; '' → sec1 device with no PoP
+    username?: string;                       // sec2 only, default 'wificfg' (the with_ble example's value; must match the device's salt/verifier)
     promptForAuth?: boolean;                 // default false — see Security versions below
   };
   protocol?: { defaultTimeoutMs?: number; endpointTimeouts?: Record<string, number> };
@@ -226,7 +226,11 @@ See `GUIDES/04-pre-wifi-customization.md` for the full pattern.
 
 ## Security versions
 
-The library defaults to **Security 1** (X25519 + AES-CTR + PoP) with PoP `abcd1234` — matches the firmware's Kconfig defaults. If you ship a single PoP across your fleet and bake it into the app, no extra UI is needed.
+The library defaults to **Security 1** (X25519 + AES-CTR + PoP). There is no default PoP; `proofOfPossession` has three meanings:
+
+- **set** — used as-is. If you ship a single PoP across your fleet, bake it in and no extra UI is needed (the firmware repo's `examples/with_ble` uses `abcd1234`, exported as `DEFAULT_POP`).
+- **unset** — the wizard inserts `enterDeviceAuth` so the user types it. Headless `connect()` throws `missing_credentials`.
+- **`''`** — the device runs Security 1 with **no PoP**, which is the firmware's own default when `prov_ble.pop` is unset. Connects without prompting; the handshake simply skips the PoP mixing step.
 
 | Firmware setting | Library config | UI behavior |
 |---|---|---|
@@ -279,7 +283,7 @@ Full guide: `GUIDES/05-error-handling.md`.
 | `useProvisioning` | step, device, error, lastResult, lastProvisionResult, action verbs (full wizard) |
 | `useDeviceScanner` | discoveredDevices, scanning, lastScanResult |
 | `useBleConnection` | device |
-| `useDeviceProtocol` | scanWifi, getVersion, getCapabilities, getNetworkPolicy, listVars, getVar, setVar, delVar + per-instance loading + error |
+| `useDeviceProtocol` | scanWifi, getVersion, getCapabilities, getNetworkPolicy, getNetworkInfo, listVars, getVar, setVar, delVar + per-instance loading + error |
 | `useDeviceVariables` | listVariables, getVariable, setVariable, deleteVariable + per-instance loading + error |
 
 ## Pre-built screens
@@ -332,11 +336,12 @@ Handles iOS (no-op + first-use dialog from Info.plist) and Android 12+/<12 (BLUE
 
 | Requirement | Value |
 |------|------|
-| Firmware | `esp_wifi_config` 0.1.0+ with `CONFIG_WIFI_CFG_ENABLE_NETWORK_PROVISIONING=y` |
+| Firmware | `esp_wifi_config` 0.2.0+ with `CONFIG_WIFI_CFG_ENABLE_NETWORK_PROVISIONING=y` (0.2.3 recommended; 0.1.0 works except the network-info endpoint is unreachable, so `lastResult.networkInfo` stays empty) |
 | Protocol | ESP-IDF Wi-Fi/Network Provisioning manager (BLE scheme) |
-| Default GAP-name prefix | `PROV_` (override via `ble.deviceNamePrefix`) |
-| Default Security | 1 (Curve25519 + AES-CTR with PoP) |
-| Default PoP | `"abcd1234"` (override per device for production) |
+| Default GAP-name prefix | `PROV_` (firmware default template is `PROV_{id}`; override via `ble.deviceNamePrefix`) |
+| Default Security | 1 (Curve25519 + AES-CTR with PoP) — the firmware's `prov_ble.security` is a runtime field, not Kconfig |
+| PoP | No library default. Set `ble.proofOfPossession` to the firmware's `prov_ble.pop` (`examples/with_ble` uses `"abcd1234"`), leave it unset to prompt the user, or pass `""` for a device with no PoP (the firmware's own default) |
+| Device IP after provisioning | Read over BLE from `esp-wifi-config-network-info` into `lastResult.networkInfo` (0.2.0+); otherwise mDNS / the device's HTTP API |
 
 The custom protocomm endpoints registered by the firmware
 (`esp-wifi-config-version`, `…-capabilities`, `…-vars`,

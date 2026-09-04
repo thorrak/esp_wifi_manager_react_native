@@ -36,7 +36,7 @@ describe('ProvisioningManager (SDK-backed)', () => {
     ];
     mockHooks.provision = async () => ({ status: 'success' });
 
-    const transport = new BleTransport({ deviceNamePrefix: 'PROV_' });
+    const transport = new BleTransport({ deviceNamePrefix: 'PROV_', proofOfPossession: 'abcd1234' });
     const protocol = new DeviceProtocol(transport);
     const manager = new ProvisioningManager(transport, protocol);
 
@@ -75,7 +75,7 @@ describe('ProvisioningManager (SDK-backed)', () => {
       throw new Error('scan failed');
     };
 
-    const transport = new BleTransport({ deviceNamePrefix: 'PROV_' });
+    const transport = new BleTransport({ deviceNamePrefix: 'PROV_', proofOfPossession: 'abcd1234' });
     const protocol = new DeviceProtocol(transport);
     const manager = new ProvisioningManager(transport, protocol);
 
@@ -101,7 +101,7 @@ describe('ProvisioningManager (SDK-backed)', () => {
       throw new Error('STA connect failed');
     };
 
-    const transport = new BleTransport({ deviceNamePrefix: 'PROV_' });
+    const transport = new BleTransport({ deviceNamePrefix: 'PROV_', proofOfPossession: 'abcd1234' });
     const protocol = new DeviceProtocol(transport);
     const manager = new ProvisioningManager(transport, protocol);
 
@@ -140,7 +140,7 @@ describe('ProvisioningManager (SDK-backed)', () => {
         resolveProvision = resolve;
       });
 
-    const transport = new BleTransport({ deviceNamePrefix: 'PROV_' });
+    const transport = new BleTransport({ deviceNamePrefix: 'PROV_', proofOfPossession: 'abcd1234' });
     const protocol = new DeviceProtocol(transport);
     const manager = new ProvisioningManager(transport, protocol);
 
@@ -331,7 +331,7 @@ describe('ProvisioningManager (SDK-backed)', () => {
       return JSON.stringify({ ok: true }); // raw JSON, as the device returns it
     };
 
-    const transport = new BleTransport({ deviceNamePrefix: 'PROV_' });
+    const transport = new BleTransport({ deviceNamePrefix: 'PROV_', proofOfPossession: 'abcd1234' });
     const protocol = new DeviceProtocol(transport);
     await transport.startScan();
     await transport.connect('PROV_X');
@@ -346,5 +346,180 @@ describe('ProvisioningManager (SDK-backed)', () => {
       key: 'mdns_name',
       value: 'demo',
     });
+  });
+
+  it('reads esp-wifi-config-network-info after a successful provision and attaches it to the result', async () => {
+    // Firmware 0.2.0+: right after CRED_SUCCESS the device keeps BLE up for
+    // ~15 s so the client can fetch its assigned IP. The manager polls the
+    // endpoint (best-effort) and surfaces the answer on
+    // ProvisioningResult.networkInfo. First poll may land before GOT_IP, so
+    // simulate one `{connected:false}` followed by a full answer.
+    mockHooks.search = (prefix) => [
+      new ESPDevice({ name: prefix + 'NI', transport: ESPTransport.ble, security: ESPSecurity.secure }),
+    ];
+    mockHooks.scanWifi = () => [{ ssid: 'Home', rssi: -45, auth: ESPWifiAuthMode.wpa2Psk }];
+    mockHooks.provision = async () => ({ status: 'success' });
+    const infoPaths: string[] = [];
+    let calls = 0;
+    mockHooks.sendData = async (path) => {
+      infoPaths.push(path);
+      calls++;
+      if (calls === 1) return JSON.stringify({ connected: false });
+      return JSON.stringify({
+        connected: true,
+        ssid: 'Home',
+        ip: '192.168.5.115',
+        gateway: '192.168.5.1',
+        hostname: 'esp-3f99',
+        rssi: -57,
+      });
+    };
+
+    const transport = new BleTransport({ deviceNamePrefix: 'PROV_', proofOfPossession: 'abcd1234' });
+    const protocol = new DeviceProtocol(transport);
+    const manager = new ProvisioningManager(transport, protocol);
+
+    const completed: unknown[] = [];
+    manager.on('provisioningComplete', (r) => completed.push(r));
+
+    await manager.start();
+    await manager.chooseDevice({ id: 'PROV_NI', name: 'PROV_NI', rssi: null });
+    manager.chooseNetwork({ ssid: 'Home', rssi: -45, auth: 'WPA2' });
+    await manager.submitPassword('hunter2');
+
+    expect(manager.currentStep).toBe('success');
+    expect(infoPaths.every((p) => p === 'esp-wifi-config-network-info')).toBe(true);
+    expect(calls).toBe(2); // stopped polling as soon as connected:true arrived
+    expect(completed).toHaveLength(1);
+    expect(completed[0]).toMatchObject({
+      success: true,
+      ssid: 'Home',
+      provisionStatus: 'success',
+      networkInfo: { connected: true, ip: '192.168.5.115', hostname: 'esp-3f99', rssi: -57 },
+    });
+  });
+
+  it('still reaches success with networkInfo undefined when the network-info endpoint is unreachable', async () => {
+    // Firmware 0.1.0 registered the endpoint without creating its GATT
+    // characteristic, so every read fails. That must never turn a successful
+    // provision into an error.
+    mockHooks.search = (prefix) => [
+      new ESPDevice({ name: prefix + 'OLD', transport: ESPTransport.ble, security: ESPSecurity.secure }),
+    ];
+    mockHooks.scanWifi = () => [{ ssid: 'Home', rssi: -45, auth: ESPWifiAuthMode.wpa2Psk }];
+    mockHooks.provision = async () => ({ status: 'success' });
+    mockHooks.sendData = async () => {
+      throw new Error('characteristic not found');
+    };
+
+    const transport = new BleTransport({ deviceNamePrefix: 'PROV_', proofOfPossession: 'abcd1234' });
+    const protocol = new DeviceProtocol(transport);
+    const manager = new ProvisioningManager(transport, protocol);
+
+    const completed: Array<{ networkInfo?: unknown }> = [];
+    manager.on('provisioningComplete', (r) => completed.push(r));
+
+    await manager.start();
+    await manager.chooseDevice({ id: 'PROV_OLD', name: 'PROV_OLD', rssi: null });
+    manager.chooseNetwork({ ssid: 'Home', rssi: -45, auth: 'WPA2' });
+    await manager.submitPassword('hunter2');
+
+    expect(manager.currentStep).toBe('success');
+    expect(manager.error).toBeNull();
+    expect(completed).toHaveLength(1);
+    expect(completed[0].networkInfo).toBeUndefined();
+  });
+
+  // -------------------------------------------------------------------------
+  // PoP semantics: unset → prompt; '' → no-PoP Security 1; no implicit default
+  // -------------------------------------------------------------------------
+
+  it("connects a no-PoP Security 1 device without prompting when proofOfPossession is ''", async () => {
+    // The firmware's own default is `prov_ble.pop = NULL` (no PoP). Both the
+    // firmware and the native SDKs skip the PoP mixing step for an empty
+    // value, so '' must reach the SDK as-is and must not trigger the auth
+    // screen.
+    mockHooks.search = (prefix) => [
+      new ESPDevice({ name: prefix + 'NOPOP', transport: ESPTransport.ble, security: ESPSecurity.secure }),
+    ];
+    mockHooks.scanWifi = () => [];
+    const seenPops: Array<string | null> = [];
+    mockHooks.connect = (_name, pop) => {
+      seenPops.push(pop);
+    };
+
+    const transport = new BleTransport({
+      deviceNamePrefix: 'PROV_',
+      security: 1,
+      proofOfPossession: '',
+    });
+    const protocol = new DeviceProtocol(transport);
+    const manager = new ProvisioningManager(transport, protocol);
+
+    const steps: string[] = [];
+    manager.on('stepChanged', (s) => steps.push(s));
+
+    await manager.start();
+    await manager.chooseDevice({ id: 'PROV_NOPOP', name: 'PROV_NOPOP', rssi: null });
+
+    expect(steps).not.toContain('enterDeviceAuth');
+    expect(steps).toContain('connectingBle');
+    expect(seenPops).toEqual(['']);
+    expect(manager.error).toBeNull();
+  });
+
+  it('inserts enterDeviceAuth when sec1 and proofOfPossession is unset (no implicit default)', async () => {
+    mockHooks.search = (prefix) => [
+      new ESPDevice({ name: prefix + 'X', transport: ESPTransport.ble, security: ESPSecurity.secure }),
+    ];
+    mockHooks.scanWifi = () => [];
+    let connectCalls = 0;
+    mockHooks.connect = () => {
+      connectCalls++;
+    };
+
+    const transport = new BleTransport({ deviceNamePrefix: 'PROV_', security: 1 });
+    const protocol = new DeviceProtocol(transport);
+    const manager = new ProvisioningManager(transport, protocol);
+
+    await manager.start();
+    await manager.chooseDevice({ id: 'PROV_X', name: 'PROV_X', rssi: null });
+
+    expect(manager.currentStep).toBe('enterDeviceAuth');
+    expect(connectCalls).toBe(0);
+    // The auth screen seeds from config; nothing to pre-fill here.
+    expect(transport.resolvedConfig.proofOfPossession).toBeUndefined();
+
+    await manager.submitDeviceAuth({ pop: 'typed-by-user' });
+    expect(connectCalls).toBe(1);
+    expect(['connectingBle', 'configuring', 'scanningWifi', 'chooseNetwork']).toContain(
+      manager.currentStep,
+    );
+  });
+
+  it('headless connect() rejects with missing_credentials when sec1 and no PoP is configured or supplied', async () => {
+    mockHooks.search = (prefix) => [
+      new ESPDevice({ name: prefix + 'X', transport: ESPTransport.ble, security: ESPSecurity.secure }),
+    ];
+    let connectCalls = 0;
+    mockHooks.connect = () => {
+      connectCalls++;
+    };
+
+    const transport = new BleTransport({ deviceNamePrefix: 'PROV_', security: 1 });
+    await transport.startScan();
+
+    await expect(transport.connect('PROV_X')).rejects.toMatchObject({
+      name: 'BleLibraryError',
+      code: 'missing_credentials',
+    });
+    expect(connectCalls).toBe(0);
+    expect(transport.connectionState).toBe('disconnected');
+    expect(transport.isConnected).toBe(false);
+
+    // Supplying the PoP per-call is enough; '' is a valid answer for sec1.
+    await transport.connect('PROV_X', { pop: '' });
+    expect(connectCalls).toBe(1);
+    expect(transport.isConnected).toBe(true);
   });
 });

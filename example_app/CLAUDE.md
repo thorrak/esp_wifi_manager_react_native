@@ -4,7 +4,7 @@ Example / test app for the [`esp-wifi-config-react-native`](https://github.com/t
 
 ## Firmware compatibility
 
-The library — and therefore this app — talks ESP-IDF Network Provisioning over BLE via `@orbital-systems/react-native-esp-idf-provisioning`. It requires ESP32 devices running [`esp_wifi_config`](https://github.com/thorrak/esp_wifi_config) **≥ 0.1.0** with `CONFIG_WIFI_CFG_ENABLE_NETWORK_PROVISIONING=y`.
+The library — and therefore this app — talks ESP-IDF Network Provisioning over BLE via `@orbital-systems/react-native-esp-idf-provisioning`. It requires ESP32 devices running [`esp_wifi_config`](https://github.com/thorrak/esp_wifi_config) **≥ 0.2.0** (0.2.3 recommended) with `CONFIG_WIFI_CFG_ENABLE_NETWORK_PROVISIONING=y`. The result screen's network-details card reads `esp-wifi-config-network-info`, which 0.1.0 never actually exposed.
 
 ## Project Structure
 
@@ -45,15 +45,15 @@ so a single React / React Native instance is used.
 
 ### ProvisioningNavigator config
 `app/provision.tsx` passes:
-- `ble.deviceNamePrefix: 'PROV_'` — matches the firmware's `CONFIG_WIFI_CFG_NETWORK_PROVISIONING_SERVICE_PREFIX` Kconfig default.
-- `ble.security: 1` with default PoP `abcd1234` — also firmware defaults.
+- `ble.deviceNamePrefix: 'PROV_'` — matches the firmware's runtime `prov_ble.device_name` default template `PROV_{id}` (there is no Kconfig option for it).
+- `ble.security: 1` with `ble.proofOfPossession: 'abcd1234'` — set explicitly; the library has no implicit PoP (unset → the wizard prompts; `''` → a device with no PoP). The value matches the firmware repo's `examples/with_ble`. Security and PoP are runtime fields on `wifi_cfg_prov_config_t`, not Kconfig; the firmware's own default is Security 1 with *no* PoP.
 - `ble.promptForAuth: true` — enables the optional `enterDeviceAuth` step so the user types the PoP at runtime (right choice for per-device PoPs; harmless for fleet-wide PoP testing).
 
 ### Pre-flight check
 `provision.tsx` uses the library's `requestBluetoothPermissions()` helper instead of any direct BLE adapter API — the native SDK owns the BLE lifecycle internally.
 
 ### Diagnostics tab
-`app/(tabs)/diagnostics.tsx` instantiates `BleTransport` and `DeviceProtocol` directly to exercise each capability in isolation: permissions → scan (default + custom prefix) → connect → `getVersion()` / `getCapabilities()` / `getNetworkPolicy()` / `listVars()` / `scanWifi()` → disconnect. Useful for verifying that a firmware build exposes all four custom protocomm endpoints.
+`app/(tabs)/diagnostics.tsx` instantiates `BleTransport` and `DeviceProtocol` directly to exercise each capability in isolation: permissions → scan (default + custom prefix) → connect → `getVersion()` / `getCapabilities()` / `getNetworkPolicy()` / `listVars()` / `scanWifi()` → disconnect. Useful for verifying that a firmware build exposes all five custom protocomm endpoints (`getNetworkInfo()` returns `{ connected: false }` until the device is on Wi-Fi, but a *thrown* error on 0.1.0 firmware is expected — the endpoint is unreachable there).
 
 ## Build & Run
 

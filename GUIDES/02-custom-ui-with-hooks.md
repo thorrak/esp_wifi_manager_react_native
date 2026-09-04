@@ -25,7 +25,7 @@ switch (step) {
 
 Each branch renders one screen. The library drives the transitions; you tell it when to act.
 
-`enterDeviceAuth` only appears when `ble.security !== 0` AND credentials are not pre-configured (or `ble.promptForAuth: true`, or you're bouncing back from an `unauthorized` error). For the default sec1-with-default-PoP flow it's skipped entirely.
+`enterDeviceAuth` only appears when `ble.security !== 0` AND credentials are not pre-configured (or `ble.promptForAuth: true`, or you're bouncing back from an `unauthorized` error). With sec1 and `proofOfPossession` set — including `''` for a device that runs without a PoP — it's skipped entirely.
 
 ## Wiring the wizard
 
@@ -205,7 +205,7 @@ case 'success':
   );
 ```
 
-The device drops BLE shortly after a successful join (and, with the firmware's `reboot_on_provisioning_success` enabled, reboots), so post-success BLE-side reads will fail. The device's IP isn't surfaced over BLE — query it via mDNS or your firmware's HTTP API once the device is on the WiFi network.
+The device drops BLE shortly after a successful join (and, unless the firmware sets `prov_ble.disable_reboot_on_provisioning_success`, reboots — by default within ~15 s of connecting, or as soon as the client disconnects). The manager uses that window to read the device's assigned IP from the `esp-wifi-config-network-info` endpoint and stores it on `lastResult.networkInfo` (firmware 0.2.0+, best-effort). Don't issue your own BLE reads after `success` — render `lastResult.networkInfo?.ip` if present, otherwise fall back to mDNS or your firmware's HTTP API once the device is on the WiFi network.
 
 ## Complete example
 

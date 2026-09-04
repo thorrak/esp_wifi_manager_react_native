@@ -14,6 +14,7 @@ import { useCallback, useState } from 'react';
 import { useProvisioningStore } from '../store/provisioningStore';
 import type {
   DeviceCapabilities,
+  DeviceNetworkInfo,
   DeviceNetworkPolicy,
   DeviceVariable,
   DeviceVersionInfo,
@@ -31,6 +32,7 @@ export function useDeviceProtocol() {
   const getVersionCmd = useProvisioningStore((s) => s.getVersion);
   const getCapabilitiesCmd = useProvisioningStore((s) => s.getCapabilities);
   const getNetworkPolicyCmd = useProvisioningStore((s) => s.getNetworkPolicy);
+  const getNetworkInfoCmd = useProvisioningStore((s) => s.getNetworkInfo);
   const listVarsCmd = useProvisioningStore((s) => s.listVars);
   const getVarCmd = useProvisioningStore((s) => s.getVar);
   const setVarCmd = useProvisioningStore((s) => s.setVar);
@@ -68,6 +70,10 @@ export function useDeviceProtocol() {
     (): Promise<DeviceNetworkPolicy> => track(getNetworkPolicyCmd()),
     [track, getNetworkPolicyCmd],
   );
+  const getNetworkInfo = useCallback(
+    (): Promise<DeviceNetworkInfo> => track(getNetworkInfoCmd()),
+    [track, getNetworkInfoCmd],
+  );
   const listVars = useCallback(
     (): Promise<DeviceVariable[]> => track(listVarsCmd()),
     [track, listVarsCmd],
@@ -96,6 +102,12 @@ export function useDeviceProtocol() {
     getVersion,
     getCapabilities,
     getNetworkPolicy,
+    /**
+     * One-shot read of the station's network details. Only meaningful once
+     * the device is on Wi-Fi (i.e. after provision()); returns
+     * `{ connected: false }` before that. Requires esp_wifi_config 0.2.0+.
+     */
+    getNetworkInfo,
     listVars,
     getVar,
     setVar,

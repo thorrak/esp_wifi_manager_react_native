@@ -46,7 +46,7 @@ if (device?.status === 'connected') { /* ... */ }
 
 ### `useDeviceProtocol()`
 
-Direct access to every device command, with per-instance `loading` and `error`. Backed by the four custom protocomm endpoints (`esp-wifi-config-version`, `-capabilities`, `-vars`, `-network-policy`) plus the SDK's `scanWifiList()` and `provision()`.
+Direct access to every device command, with per-instance `loading` and `error`. Backed by the five custom protocomm endpoints (`esp-wifi-config-version`, `-capabilities`, `-vars`, `-network-policy`, `-network-info`) plus the SDK's `scanWifiList()` and `provision()`.
 
 ```ts
 const {
@@ -150,7 +150,7 @@ Notable methods:
 
 ### `DeviceProtocol`
 
-Layer 2. SDK's atomic `provision()` + `scanWifiList()` plus JSON-over-base64 wrappers for the four custom protocomm endpoints.
+Layer 2. SDK's atomic `provision()` + `scanWifiList()` plus JSON-over-base64 wrappers for the five custom protocomm endpoints.
 
 ```ts
 const protocol = new DeviceProtocol(transport);
@@ -160,7 +160,9 @@ const v = await protocol.getVersion();
 await protocol.setVar('mdns_name', 'demo');
 ```
 
-Methods: `scanWifi`, `provision`, `getVersion`, `getCapabilities`, `getNetworkPolicy`, `listVars`, `getVar`, `setVar`, `delVar`, `destroy`. Emits `busyChanged` and `endpointError`.
+Methods: `scanWifi`, `provision`, `getVersion`, `getCapabilities`, `getNetworkPolicy`, `getNetworkInfo`, `waitForNetworkInfo(attempts = 3, intervalMs = 1000)`, `listVars`, `getVar`, `setVar`, `delVar`, `destroy`. Emits `busyChanged` and `endpointError`.
+
+`getNetworkInfo()` reads `esp-wifi-config-network-info` once and may return `{ connected: false }` before the device has an IP. `waitForNetworkInfo()` polls it until `connected` is true or the attempts run out; it never throws and resolves `null` if every attempt failed (firmware < 0.2.0, or BLE already dropped). Keep the total budget well inside the firmware's ~15 s post-success reboot backstop.
 
 ### `ProvisioningManager`
 
@@ -271,10 +273,17 @@ type ProvisioningResult = {
   provisionStatus?: string;
   deviceName?: string;
   deviceId?: string;
+  /**
+   * Station details read from `esp-wifi-config-network-info` right after
+   * provisioning, while BLE is still up. Best-effort: undefined if the fetch
+   * failed (firmware < 0.2.0, BLE dropped first); `{ connected: false }` if
+   * the IP had not landed within the retry window.
+   */
+  networkInfo?: DeviceNetworkInfo;
 };
 ```
 
-The device's IP is not surfaced over BLE — fetch via mDNS or the firmware's HTTP API once provisioning lands.
+The SDK's `provision()` does not return the device's IP; the manager fills `networkInfo` from the firmware endpoint instead (see `DeviceNetworkInfo`). If it is absent, fall back to mDNS or the firmware's HTTP API once the device is on the network.
 
 ### `ProvisionResult`
 
@@ -307,11 +316,13 @@ type BleTransportConfig = {
   deviceNamePrefix?: string | string[];   // default 'PROV_'
   scanTimeoutMs?: number;                  // default 10_000
   security?: 0 | 1 | 2;                    // default 1
-  proofOfPossession?: string;              // default 'abcd1234' (sec1 PoP, sec2 SRP password)
+  proofOfPossession?: string;              // sec1 PoP / sec2 SRP password — no default, see below
   username?: string;                       // sec2 only, default 'wificfg'
   promptForAuth?: boolean;                 // default false — force enterDeviceAuth step
 };
 ```
+
+`proofOfPossession` has no default. Unset → the wizard inserts `enterDeviceAuth` and a headless `connect()` throws `BleLibraryError('missing_credentials')`. `''` → the device runs Security 1 with no PoP (the firmware's own default when `prov_ble.pop` is unset) and connects without prompting. Any other string is used as-is; `DEFAULT_POP` (`'abcd1234'`) is the firmware repo's `examples/with_ble` value for apps that want to name it explicitly. The `username` default likewise mirrors `examples/with_ble` — the firmware has no username default; it must be whatever the Security 2 salt + verifier were derived from.
 
 ### `DeviceProtocolConfig`
 
@@ -370,9 +381,14 @@ type ScanCompletedInfo = {
 };
 ```
 
-### `DeviceVersionInfo` / `DeviceCapabilities` / `DeviceNetworkPolicy` / `DeviceVariable`
+### `DeviceVersionInfo` / `DeviceCapabilities` / `DeviceNetworkPolicy` / `DeviceNetworkInfo` / `DeviceVariable`
 
-Typed responses from the four custom protocomm endpoints. See `src/types/protocol.ts`.
+Typed responses from the five custom protocomm endpoints. See `src/types/protocol.ts`.
+
+- `DeviceVersionInfo.lib` is hardcoded to `"esp_wifi_config 0.1.0"` in firmware 0.1.0–0.2.3 regardless of the real component version — gate on `fw_version` / `firmware_version` instead.
+- `DeviceCapabilities.capabilities` is `Array<DeviceCapability | string>`; known flags are `'multi-network' | 'custom-vars' | 'improv-serial' | 'webui' | 'cli' | 'softap'`.
+- `DeviceNetworkPolicy.provisioning_mode` is `DeviceProvisioningMode | string` — `'always' | 'on_failure' | 'when_unprovisioned' | 'manual' | 'unknown'`. The firmware sends the name, never the enum number.
+- `DeviceNetworkInfo` is `{ connected: boolean; ip?, netmask?, gateway?, dns?, mac?, bssid?, hostname?, ssid?, rssi?, quality?, channel?, uptime_ms? }`; when `connected` is false the rest is absent.
 
 ### `BleLibraryError`
 
@@ -380,7 +396,7 @@ Extends `Error`. Thrown by BLE-level operations.
 
 ```ts
 type BleErrorCode =
-  | 'unauthorized' | 'powered_off' | 'unsupported'
+  | 'unauthorized' | 'missing_credentials' | 'powered_off' | 'unsupported'
   | 'scan_error' | 'connect_error' | 'provision_error' | 'unknown';
 ```
 
@@ -396,11 +412,10 @@ catch (err) {
 
 | Constant | Value |
 |------|------|
-| `DEVICE_NAME_PREFIX` | `'PROV_'` (matches the firmware's `wifi_prov_scheme_ble` default) |
-| `DEFAULT_POP` | `'abcd1234'` |
-| `DEFAULT_SECURITY2_USERNAME` | `'wificfg'` |
+| `DEVICE_NAME_PREFIX` | `'PROV_'` (matches the firmware's `prov_ble.device_name` default `"PROV_{id}"`) |
+| `DEFAULT_POP` | `'abcd1234'` — the `examples/with_ble` value. **Not applied implicitly**; pass it explicitly if you want it |
+| `DEFAULT_SECURITY2_USERNAME` | `'wificfg'` (matches `examples/with_ble`; the firmware has no default) |
 | `DEFAULT_SCAN_TIMEOUT_MS` | `10_000` |
-| `DEFAULT_SDK_TIMEOUT_MS` | `15_000` |
 | `DEFAULT_ENDPOINT_TIMEOUT_MS` | `8_000` |
 | `DEFAULT_WIFI_SCAN_TIMEOUT_MS` | `15_000` |
 | `DEFAULT_PROVISION_TIMEOUT_MS` | `60_000` |

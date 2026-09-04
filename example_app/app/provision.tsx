@@ -222,6 +222,11 @@ export default function ProvisionScreen() {
               // under ~5s often returns empty even with a device present.
               scanTimeoutMs: 10000,
               security: 1,
+              // The library has no implicit PoP. This is the firmware repo's
+              // examples/with_ble value; with promptForAuth it pre-fills the
+              // auth screen. Set '' for a device whose firmware runs Security 1
+              // with no PoP; leave unset to force the user to type one.
+              proofOfPossession: 'abcd1234',
               promptForAuth: true,
             },
           }}

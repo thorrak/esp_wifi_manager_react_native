@@ -67,7 +67,7 @@ export default function Index() {
 }
 ```
 
-That's it. The navigator owns the entire flow; you just hand it a `config` and two callbacks. The device's IP is not surfaced over BLE — fetch it via mDNS or your firmware's HTTP API once provisioning lands.
+That's it. The navigator owns the entire flow; you just hand it a `config` and two callbacks. The device's IP arrives in `onComplete`'s `result.networkInfo` (read over BLE from the firmware's `esp-wifi-config-network-info` endpoint, firmware 0.2.0+, best-effort). If it's missing, fall back to mDNS or your firmware's HTTP API once the device is on the network.
 
 ## 4. Run on a device
 
@@ -102,6 +102,6 @@ BLE in simulators is unreliable — use a physical device.
 ## Troubleshooting
 
 - **"BLE adapter is not ready"** — Bluetooth is off or the OS hasn't initialized the adapter yet. The library retries for 10s before giving up.
-- **No devices found** — verify `deviceNamePrefix` matches your firmware's advertised name (default `PROV_`). The store exposes `lastScanResult.sampleNames` for diagnostics.
+- **No devices found** — verify `deviceNamePrefix` matches your firmware's advertised name (the firmware's `prov_ble.device_name` template defaults to `PROV_{id}`, so `PROV_`). The native SDK does not report unmatched names (`lastScanResult.sampleNames` is always empty), so check the device's serial log for the `Provisioning advertising as …` line instead. Also confirm the device is actually advertising: with `provisioning_mode = ON_FAILURE` it only does so while unprovisioned.
 - **"BLE connect error: unauthorized…"** — the configured `proofOfPossession` (or SRP credentials) didn't match the device. With `promptForAuth: true` the wizard bounces back to `enterDeviceAuth` with the last entered values pre-filled so the user can fix a typo without re-scanning.
 - **Permissions denied on Android 12+** — call `requestBluetoothPermissions()` before `start()`. The pre-built navigator does NOT call this for you.

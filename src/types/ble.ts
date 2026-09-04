@@ -10,6 +10,12 @@
 
 export type BleErrorCode =
   | 'unauthorized'
+  /**
+   * `connect()` was called for Security 1/2 with no PoP configured and none
+   * supplied. Only reachable headless — the wizard inserts `enterDeviceAuth`
+   * first. Pass `''` for a Security 1 device that runs without a PoP.
+   */
+  | 'missing_credentials'
   | 'powered_off'
   | 'unsupported'
   | 'scan_error'
@@ -92,7 +98,8 @@ export interface BleTransportEvents {
 
 /**
  * Security version selector. Maps onto the SDK's `ESPSecurity` enum and
- * the firmware's `CONFIG_WIFI_CFG_NETWORK_PROVISIONING_SECURITY_*` choice.
+ * the firmware's runtime `wifi_cfg_prov_config_t.security` field
+ * (`WIFI_CFG_PROV_SECURITY_0/1/2`; the firmware's `DEFAULT` resolves to 1).
  */
 export type SecurityVersion = 0 | 1 | 2;
 
@@ -107,11 +114,24 @@ export interface BleTransportConfig {
    */
   security?: SecurityVersion;
   /**
-   * Proof-of-possession (Security 1) or SRP password (Security 2).
-   * Default: `"abcd1234"` (Kconfig default; override per-device for production).
+   * Proof-of-possession (Security 1) or SRP password (Security 2). There is
+   * no default; the three states mean different things:
+   *
+   *   - `undefined` — not configured. The wizard inserts `enterDeviceAuth` so
+   *     the user types it; a headless `connect()` throws `missing_credentials`.
+   *   - `''` — the device runs Security 1 **with no PoP** (the firmware's own
+   *     default when `prov_ble.pop` is unset). Connects without prompting.
+   *   - any other string — used as-is. The firmware repo's `examples/with_ble`
+   *     uses `'abcd1234'`, exported here as `DEFAULT_POP` for convenience.
+   *
+   * Ignored for Security 0.
    */
   proofOfPossession?: string;
-  /** SRP6a username for Security 2. Default: `"wificfg"`. */
+  /**
+   * SRP6a username for Security 2. Must be the username the device's
+   * salt + verifier were derived from. Default: `"wificfg"` (again the
+   * `examples/with_ble` value — the firmware itself has no default).
+   */
   username?: string;
   /**
    * Force the wizard to insert an `enterDeviceAuth` step where the user

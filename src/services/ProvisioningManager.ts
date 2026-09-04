@@ -289,9 +289,11 @@ export class ProvisioningManager extends TypedEventEmitter<ProvisioningManagerEv
     } catch (err) {
       const code = err instanceof BleLibraryError ? err.code : undefined;
 
-      if (code === 'unauthorized') {
+      if (code === 'unauthorized' || code === 'missing_credentials') {
         // Stay locked into the auth screen on subsequent chooseDevice
-        // calls until the user successfully connects.
+        // calls until the user successfully connects. `missing_credentials`
+        // shouldn't happen here (shouldPromptForAuth gates it) but the
+        // right recovery is the same: ask the user.
         this._forceAuthPrompt = true;
         this._device = null;
         this.emit('deviceConnectionChanged', null);
@@ -362,9 +364,11 @@ export class ProvisioningManager extends TypedEventEmitter<ProvisioningManagerEv
     if (this._forceAuthPrompt) return true;
     if (promptForAuth) return true;
     if (security === 1) {
-      return !proofOfPossession;
+      // `''` is deliberate — "this device runs Security 1 with no PoP" — and
+      // connects without prompting. Only an unset value asks the user.
+      return proofOfPossession === undefined;
     }
-    // sec2: needs pop (SRP password) + username
+    // sec2: needs a non-empty SRP password + username
     return !proofOfPossession || !username;
   }
 

@@ -9,7 +9,7 @@
 | Class | What it owns |
 |------|------|
 | `BleTransport` | BLE I/O via the native ESP-IDF SDK: scan, connect (with session-init), disconnect |
-| `DeviceProtocol` | SDK `provision()` + `scanWifiList()` + JSON-over-base64 for the four custom protocomm endpoints |
+| `DeviceProtocol` | SDK `provision()` + `scanWifiList()` + JSON-over-base64 for the five custom protocomm endpoints |
 | `ProvisioningManager` | Full step machine — only useful when you want the wizard's event flow, error wrapping, and `onConnected` hook |
 
 For headless work, you typically only need the first two. The SDK's `provision()` is atomic — it sends credentials AND waits for STA-connect — so there is no separate polling loop to manage.
@@ -69,10 +69,10 @@ try {
 
 ## Custom protocomm endpoints
 
-`DeviceProtocol` exposes typed wrappers for the four custom endpoints the firmware registers (always-on as of esp_wifi_config 0.1.0+):
+`DeviceProtocol` exposes typed wrappers for the five custom endpoints the firmware registers (always-on; esp_wifi_config 0.2.0+ for all five to be reachable):
 
 ```ts
-const version = await protocol.getVersion();          // { lib, idf, fw_version, ... }
+const version = await protocol.getVersion();          // { lib, idf, fw_version, ... }  — `lib` is hardcoded "0.1.0" on 0.1.0–0.2.3, gate on fw_version instead
 const caps    = await protocol.getCapabilities();     // { capabilities: ['multi-network', ...] }
 const policy  = await protocol.getNetworkPolicy();    // { provisioning_mode, max_retry_per_network, ... }
 
@@ -80,9 +80,12 @@ const vars    = await protocol.listVars();            // [{ key, value }, ...]
 const v       = await protocol.getVar('mdns_name');   // { key, value } | null
 await protocol.setVar('mdns_name', 'my-device');
 await protocol.delVar('mdns_name');
+
+// After provision() resolves, while BLE is still up:
+const info = await protocol.waitForNetworkInfo();     // { connected: true, ip, gateway, rssi, ... } | { connected: false } | null
 ```
 
-All of these only work between `connect()` and the device dropping BLE on successful provision (or you calling `disconnect()`).
+All of these only work between `connect()` and the device dropping BLE on successful provision (or you calling `disconnect()`). `waitForNetworkInfo()` is the one call meant for *after* `provision()`: the firmware keeps BLE up for ~15 s after the join (or until you disconnect) precisely so the client can read the assigned IP. It never throws — `null` means every attempt failed (firmware 0.1.0, or the link already dropped).
 
 ## Errors
 

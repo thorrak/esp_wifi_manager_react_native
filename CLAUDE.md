@@ -4,7 +4,7 @@ This file is the canonical entry point for AI agents (Claude Code, etc.) integra
 
 ## What this library does
 
-`esp-wifi-config-react-native` is a React Native library that lets a mobile app provision Wi-Fi credentials onto an ESP32 device over BLE using ESP-IDF's official Wi-Fi/Network Provisioning protocol. The device must be running [esp_wifi_config](https://github.com/thorrak/esp_wifi_config) **0.1.0+** firmware with `CONFIG_WIFI_CFG_ENABLE_NETWORK_PROVISIONING=y`.
+`esp-wifi-config-react-native` is a React Native library that lets a mobile app provision Wi-Fi credentials onto an ESP32 device over BLE using ESP-IDF's official Wi-Fi/Network Provisioning protocol. The device must be running [esp_wifi_config](https://github.com/thorrak/esp_wifi_config) **0.2.0+** firmware (0.2.3 recommended) with `CONFIG_WIFI_CFG_ENABLE_NETWORK_PROVISIONING=y`. The firmware repo is expected at `../esp_wifi_config/`; `MIGRATION.md` tracks firmware-side changes that affect this library.
 
 The library wraps Espressif's native iOS/Android provisioning SDKs via
 [`@orbital-systems/react-native-esp-idf-provisioning`](https://www.npmjs.com/package/@orbital-systems/react-native-esp-idf-provisioning)
@@ -25,7 +25,7 @@ BleTransport   ── thin wrapper around the native ESP-IDF SDK:
                   searchESPDevices / connect / disconnect
      ↓
 DeviceProtocol ── SDK provision() + scanWifiList() + JSON-over-base64
-                  for the four custom protocomm endpoints
+                  for the five custom protocomm endpoints
      ↓
 ProvisioningManager ── wizard step machine, error wrapping, onConnected hook
      ↓
@@ -131,7 +131,7 @@ type DeviceConnection =
 
 2. **Don't read multiple error fields.** There is one: `error`. Sources are tagged via `error.source`. The old `bleError` / `pollError` / `provisioningError` fields are gone.
 
-3. **Don't use `lastResult` for in-flow status.** It only fills in on `success`. While the wizard is running, read `device.name` for the device and `selectedNetwork` for the WiFi target. There is no live `wifiSsid`/`wifiIp` stream from the SDK; the IP is not surfaced over BLE — fetch it via the device's HTTP API once it's on the network.
+3. **Don't use `lastResult` for in-flow status.** It only fills in on `success`. While the wizard is running, read `device.name` for the device and `selectedNetwork` for the WiFi target. There is no live `wifiSsid`/`wifiIp` stream from the SDK. The device's IP arrives once, on `success`, as `lastResult.networkInfo` (read over BLE from `esp-wifi-config-network-info`, best-effort, firmware 0.2.0+); if it's absent, fetch it via mDNS or the device's HTTP API once it's on the network.
 
 4. **Don't gate effects on a global `busy` flag.** There isn't one. Each hook (`useDeviceVariables`, `useDeviceProtocol`) tracks its own `loading` per-instance. Use that.
 
@@ -209,8 +209,8 @@ type ProvisioningConfig = {
     deviceNamePrefix?: string | string[];   // default 'PROV_'
     scanTimeoutMs?: number;                  // default 10000
     security?: 0 | 1 | 2;                    // default 1
-    proofOfPossession?: string;              // default 'abcd1234' (sec1 PoP, sec2 SRP password)
-    username?: string;                       // sec2 only, default 'wificfg'
+    proofOfPossession?: string;              // sec1 PoP / sec2 SRP password. No default: unset → wizard prompts; '' → sec1 device with no PoP
+    username?: string;                       // sec2 only, default 'wificfg' (the with_ble example's value; must match the device's salt/verifier)
     promptForAuth?: boolean;                 // default false — force the enterDeviceAuth screen
   };
   protocol?: {
@@ -227,7 +227,7 @@ type ProvisioningConfig = {
 
 ### Security versions in one paragraph
 
-Default is **Security 1** (X25519 + AES-CTR + PoP) with PoP `"abcd1234"` — matches the `esp_wifi_config` example's default (security is a runtime field in `wifi_cfg_prov_config_t`, set in the firmware's `main.c`, not a Kconfig option). The user will likely want to change the PoP string.  For **Security 0** (no encryption), set `ble.security: 0`; no PoP/username needed. For **Security 2** (SRP6a + AES-GCM), set `ble.security: 2` and either pre-configure `proofOfPossession` (SRP password) + `username`, or set `promptForAuth: true` so users enter both in the wizard. Set `promptForAuth: true` whenever each device has a unique PoP/credentials (e.g. printed on a label) and you don't want to ship one app per device.
+Default is **Security 1** (X25519 + AES-CTR + PoP) with **no default PoP**. `proofOfPossession` set → used as-is (`examples/with_ble` in the firmware repo uses `"abcd1234"`, exported as `DEFAULT_POP`); unset → the wizard inserts `enterDeviceAuth`; `''` → the device runs Security 1 with no PoP, which is the firmware's own default when `prov_ble.pop` is unset (security and PoP are runtime fields in `wifi_cfg_prov_config_t`, set in the firmware's `main.c`, not Kconfig). For **Security 0** (no encryption), set `ble.security: 0`; no PoP/username needed. For **Security 2** (SRP6a + AES-GCM), set `ble.security: 2` and either pre-configure `proofOfPossession` (SRP password) + `username`, or set `promptForAuth: true` so users enter both in the wizard. Set `promptForAuth: true` whenever each device has a unique PoP/credentials (e.g. printed on a label) and you don't want to ship one app per device.
 
 > **Security 2 is also a firmware-side requirement.** The device won't start the Sec2 manager
 > unless a pre-computed SRP6a salt + verifier are compiled into the firmware (the raw PoP is not
@@ -264,14 +264,14 @@ Pass to `<ProvisioningNavigator config={...} />` or `initializeServices(config)`
 - `ARCHITECTURE.md` — internal layering, event flow, contributor guide
 - `API.md` — exhaustive symbol reference
 - `example_app/` — full runnable Expo example app (links the library via `file:..`); `examples/` — focused snippet files
-- `example_app/` — full runnable Expo example app (links the library via `file:..`); `examples/` — focused snippet files
+- `MIGRATION.md` — firmware-version alignment notes and the app-migration checklist
 
 ## Code style notes
 
 - Every public export gets at least one-line JSDoc + `@example` for non-trivial APIs.
 - Tests are in `src/__tests__/`. Run with `npm test`. ProvisioningManager tests are the canonical specification of step transitions.
 - Build with `npm run build` (CommonJS + ESM + `.d.ts`).
-- Typecheck: `npm run typecheck`. Lint: `npm run lint`.
+- Typecheck: `npm run typecheck`. Lint: `npm run lint` (ESLint 10 flat config in `eslint.config.mjs`; library sources only — `example_app/` and `examples/` are excluded).
 
 ## Don't
 

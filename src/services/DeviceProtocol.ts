@@ -1,11 +1,11 @@
 /**
  * DeviceProtocol — Layer 2 of the ESP WiFi Config library.
  *
- * Handles the four custom protocomm endpoints registered by
- * esp_wifi_config 0.1.0+ (`esp-wifi-config-version`, `…-capabilities`,
- * `…-vars`, `…-network-policy`) plus thin wrappers around the SDK's
- * `scanWifiList()` and `provision()` so callers can stay at one
- * abstraction level.
+ * Handles the five custom protocomm endpoints registered by
+ * esp_wifi_config 0.2.0+ (`esp-wifi-config-version`, `…-capabilities`,
+ * `…-vars`, `…-network-policy`, `…-network-info`) plus thin wrappers
+ * around the SDK's `scanWifiList()` and `provision()` so callers can stay
+ * at one abstraction level.
  *
  * Custom endpoint payloads are JSON encoded as UTF-8, then sent through
  * `ESPDevice.sendData()` which handles base64 framing and protocomm
@@ -371,6 +371,7 @@ export class DeviceProtocol extends TypedEventEmitter<DeviceProtocolEvents> {
           `Invalid JSON response from ${endpoint}: ${
             err instanceof Error ? err.message : String(err)
           } | raw=${JSON.stringify(snippet)}`,
+          { cause: err },
         );
       }
     } catch (err) {

@@ -10,7 +10,8 @@
  *     those are not part of the BLE provisioning protocol (use the device's
  *     HTTP API for post-join management).
  *   - Custom protocomm endpoints surface as `getVersion`, `getCapabilities`,
- *     `getNetworkPolicy`, `listVars`, `delVar` actions.
+ *     `getNetworkPolicy`, `getNetworkInfo`, `listVars`, `getVar`, `setVar`,
+ *     `delVar` actions.
  */
 
 import { create } from 'zustand';
@@ -27,6 +28,7 @@ import type {
   DeviceAuthCredentials,
   DeviceCapabilities,
   DeviceConnection,
+  DeviceNetworkInfo,
   DeviceNetworkPolicy,
   DeviceVariable,
   DeviceVersionInfo,
@@ -111,6 +113,7 @@ export interface ProvisioningStoreActions {
   getVersion: () => Promise<DeviceVersionInfo>;
   getCapabilities: () => Promise<DeviceCapabilities>;
   getNetworkPolicy: () => Promise<DeviceNetworkPolicy>;
+  getNetworkInfo: () => Promise<DeviceNetworkInfo>;
   listVars: () => Promise<DeviceVariable[]>;
   getVar: (key: string) => Promise<DeviceVariable | null>;
   setVar: (key: string, value: string) => Promise<void>;
@@ -368,6 +371,10 @@ export const useProvisioningStore = create<
   getNetworkPolicy: async () => {
     ensureInitialized(set);
     return getProtocol().getNetworkPolicy();
+  },
+  getNetworkInfo: async () => {
+    ensureInitialized(set);
+    return getProtocol().getNetworkInfo();
   },
   listVars: async () => {
     ensureInitialized(set);

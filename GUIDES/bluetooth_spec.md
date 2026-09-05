@@ -9,7 +9,7 @@
 > in order to establish ground truth.
 >
 > The `esp_wifi_config` library for ESP32 reimplements this protocol in the Python test
-> script. The `esp_wifi_config_react_native` library relies on the 
+> script. The `esp-wifi-config-react-native` library relies on the 
 > `@orbital-systems/react-native-esp-idf-provisioning` library to implement the spec. 
 
 ---

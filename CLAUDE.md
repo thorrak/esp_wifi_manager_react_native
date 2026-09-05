@@ -4,7 +4,7 @@ This file is the canonical entry point for AI agents (Claude Code, etc.) integra
 
 ## What this library does
 
-`esp-wifi-config-react-native` is a React Native library that lets a mobile app provision Wi-Fi credentials onto an ESP32 device over BLE using ESP-IDF's official Wi-Fi/Network Provisioning protocol. The device must be running [esp_wifi_config](https://github.com/thorrak/esp_wifi_config) **0.2.0+** firmware (0.2.3 recommended) with `CONFIG_WIFI_CFG_ENABLE_NETWORK_PROVISIONING=y`. The firmware repo is expected at `../esp_wifi_config/`; `MIGRATION.md` tracks firmware-side changes that affect this library.
+`esp-wifi-config-react-native` is a React Native library that lets a mobile app provision Wi-Fi credentials onto an ESP32 device over BLE using ESP-IDF's official Wi-Fi/Network Provisioning protocol. The device must be running [esp_wifi_config](https://github.com/WiFiConfig/esp_wifi_config) **0.2.0+** firmware (0.2.3 recommended) with `CONFIG_WIFI_CFG_ENABLE_NETWORK_PROVISIONING=y`. The firmware repo is expected at `../esp_wifi_config/`; `MIGRATION.md` tracks firmware-side changes that affect this library.
 
 The library wraps Espressif's native iOS/Android provisioning SDKs via
 [`@orbital-systems/react-native-esp-idf-provisioning`](https://www.npmjs.com/package/@orbital-systems/react-native-esp-idf-provisioning)

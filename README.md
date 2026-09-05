@@ -2,7 +2,7 @@
 
 BLE-based Wi-Fi provisioning for ESP32 devices from React Native apps.
 
-Talks to ESP32 devices running [esp_wifi_config](https://github.com/thorrak/esp_wifi_config) **0.2.0+** firmware (0.2.3 recommended) via ESP-IDF's official Wi-Fi/Network Provisioning protocol over BLE, drives a 10-step state machine, and ships pre-built screens you can drop in or replace.
+Talks to ESP32 devices running [esp_wifi_config](https://github.com/WiFiConfig/esp_wifi_config) **0.2.0+** firmware (0.2.3 recommended) via ESP-IDF's official Wi-Fi/Network Provisioning protocol over BLE, drives a 10-step state machine, and ships pre-built screens you can drop in or replace.
 
 It wraps Espressif's native iOS/Android provisioning SDKs via
 [`@orbital-systems/react-native-esp-idf-provisioning`](https://www.npmjs.com/package/@orbital-systems/react-native-esp-idf-provisioning),
@@ -365,7 +365,7 @@ npm run build  # CommonJS + ESM + .d.ts
 
 - [CLAUDE.md](./CLAUDE.md) — agent integration guide (start here)
 - [GUIDES/](./GUIDES/) — task-oriented walkthroughs
-- [example_app/](./example_app/) — full runnable Expo example app (navigator flow + diagnostics)
+- [example_app/](./example_app/) — full runnable Expo example app (navigator flow + diagnostics); also published standalone as [WiFiConfig/EspWifiReactTest](https://github.com/WiFiConfig/EspWifiReactTest)
 - [examples/](./examples/) — focused copy-pasteable snippet files
 - [API.md](./API.md) — exhaustive symbol reference
 - [ARCHITECTURE.md](./ARCHITECTURE.md) — internal layering and event flow

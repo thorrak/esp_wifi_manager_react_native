@@ -5,7 +5,7 @@
 Initial release. React Native library for provisioning Wi-Fi credentials onto an ESP32 over BLE
 using ESP-IDF's official Network/Wi-Fi Provisioning protocol, via the
 [`@orbital-systems/react-native-esp-idf-provisioning`](https://www.npmjs.com/package/@orbital-systems/react-native-esp-idf-provisioning)
-native SDK. Targets [`esp_wifi_config`](https://github.com/thorrak/esp_wifi_config) 0.2.0+ firmware
+native SDK. Targets [`esp_wifi_config`](https://github.com/WiFiConfig/esp_wifi_config) 0.2.0+ firmware
 (0.2.3 recommended) with `CONFIG_WIFI_CFG_ENABLE_NETWORK_PROVISIONING=y`. See `MIGRATION.md` for
 the firmware-version alignment notes.
 

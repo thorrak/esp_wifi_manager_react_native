@@ -1,6 +1,8 @@
 # EspWifiReactTest
 
-Example app demonstrating [esp-wifi-config-react-native](https://github.com/thorrak/esp_wifi_config_react_native) — a React Native library for BLE-based WiFi provisioning of ESP32 devices running [esp_wifi_config](https://github.com/thorrak/esp_wifi_config) firmware (≥ 0.2.0; 0.2.3 recommended).
+Example app demonstrating [esp-wifi-config-react-native](https://github.com/WiFiConfig/esp-wifi-config-react-native) — a React Native library for BLE-based WiFi provisioning of ESP32 devices running [esp_wifi_config](https://github.com/WiFiConfig/esp_wifi_config) firmware (≥ 0.2.0; 0.2.3 recommended).
+
+The standalone version of this app lives at [WiFiConfig/EspWifiReactTest](https://github.com/WiFiConfig/EspWifiReactTest).
 
 The library wraps Espressif's official iOS / Android provisioning SDKs via [`@orbital-systems/react-native-esp-idf-provisioning`](https://www.npmjs.com/package/@orbital-systems/react-native-esp-idf-provisioning) and speaks ESP-IDF Network Provisioning over BLE.
 

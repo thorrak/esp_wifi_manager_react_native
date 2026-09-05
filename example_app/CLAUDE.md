@@ -1,10 +1,10 @@
 # ESP WiFi React Test
 
-Example / test app for the [`esp-wifi-config-react-native`](https://github.com/thorrak/esp_wifi_config_react_native) library. It lives in the library repo under `example_app/` and consumes the library directly from the parent directory via a local `file:..` dependency, so library edits are picked up without a reinstall.
+Example / test app for the [`esp-wifi-config-react-native`](https://github.com/WiFiConfig/esp-wifi-config-react-native) library. It lives in the library repo under `example_app/` (also published standalone as [WiFiConfig/EspWifiReactTest](https://github.com/WiFiConfig/EspWifiReactTest)) and consumes the library directly from the parent directory via a local `file:..` dependency, so library edits are picked up without a reinstall.
 
 ## Firmware compatibility
 
-The library — and therefore this app — talks ESP-IDF Network Provisioning over BLE via `@orbital-systems/react-native-esp-idf-provisioning`. It requires ESP32 devices running [`esp_wifi_config`](https://github.com/thorrak/esp_wifi_config) **≥ 0.2.0** (0.2.3 recommended) with `CONFIG_WIFI_CFG_ENABLE_NETWORK_PROVISIONING=y`. The result screen's network-details card reads `esp-wifi-config-network-info`, which 0.1.0 never actually exposed.
+The library — and therefore this app — talks ESP-IDF Network Provisioning over BLE via `@orbital-systems/react-native-esp-idf-provisioning`. It requires ESP32 devices running [`esp_wifi_config`](https://github.com/WiFiConfig/esp_wifi_config) **≥ 0.2.0** (0.2.3 recommended) with `CONFIG_WIFI_CFG_ENABLE_NETWORK_PROVISIONING=y`. The result screen's network-details card reads `esp-wifi-config-network-info`, which 0.1.0 never actually exposed.
 
 ## Project Structure
 

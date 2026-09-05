@@ -4,6 +4,8 @@
 
 If you are an AI agent helping integrate or modify this library, read CLAUDE.md first.
 
+Source: https://github.com/WiFiConfig/esp-wifi-config-react-native · Firmware: https://github.com/WiFiConfig/esp_wifi_config · Example app: https://github.com/WiFiConfig/EspWifiReactTest
+
 ## Documentation
 
 - [CLAUDE.md](CLAUDE.md): Primary agent integration guide. Mental model, step machine table, action verbs, common pitfalls, file map. Read this first.

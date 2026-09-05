@@ -13,7 +13,7 @@
       "infoPlist": {
         "NSBluetoothAlwaysUsageDescription": "This app uses Bluetooth to communicate with ESP devices for WiFi provisioning."
       },
-      "bundleIdentifier": "com.thorrak.EspWifiReactTest"
+      "bundleIdentifier": "com.wificonfig.EspWifiReactTest"
     },
     "android": {
       "adaptiveIcon": {
@@ -32,7 +32,7 @@
         "android.permission.BLUETOOTH_ADMIN",
         "android.permission.BLUETOOTH_CONNECT"
       ],
-      "package": "com.thorrak.EspWifiReactTest"
+      "package": "com.wificonfig.EspWifiReactTest"
     },
     "web": {
       "output": "static",
